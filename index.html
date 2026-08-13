@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>어디 갈까 — 우리나라 여행 지도</title>
+<style>
+:root{
+  --sea:#BFE3F2; --sea2:#A9D8ED; --bg:#FBF7EF;
+  --card:#FFFFFF; --line:#EBE0D0; --line2:#D9CCB8;
+  --ink:#33302B; --ink2:#6E655B; --ink3:#A79C8E;
+  --hot:#F2695B; --hot-bg:#FDE9E6;
+  --blue:#3E9AD1; --blue-bg:#E5F2FA;
+  --green:#43BE92; --green-bg:#E3F7EF;
+  --gold:#EEA83A; --gold-bg:#FDF2DE;
+  --grape:#8D74D6; --grape-bg:#F0EBFB;
+  --sans:"Pretendard","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--sea);color:var(--ink);font-family:var(--sans);word-break:keep-all;
+     overflow:hidden;-webkit-font-smoothing:antialiased}
+h1,h2,h3{margin:0;font-weight:800;letter-spacing:-.02em}
+
+/* ── 사이드바 ── */
+.side{position:fixed;left:12px;top:12px;bottom:12px;width:132px;z-index:25;background:var(--card);
+      border:2px solid var(--line2);border-radius:18px;box-shadow:0 4px 0 rgba(140,120,90,.16);
+      padding:12px 9px;overflow:auto;display:flex;flex-direction:column;gap:3px}
+.side h2{font-size:12px;color:var(--ink3);letter-spacing:.08em;padding:2px 8px 7px}
+.side button{display:flex;align-items:center;justify-content:space-between;gap:6px;width:100%;
+      border:none;background:none;font:inherit;font-size:13.5px;font-weight:800;color:var(--ink2);
+      padding:8px 10px;border-radius:11px;cursor:pointer;text-align:left;transition:.12s}
+.side button:hover{background:var(--bg)}
+.side button.on{background:var(--green);color:#fff}
+.side button em{font-style:normal;font-size:11px;font-weight:700;opacity:.55;
+      font-variant-numeric:tabular-nums}
+.side button.on em{opacity:.85}
+.side .all{border-bottom:1.5px solid var(--line);border-radius:11px 11px 0 0;margin-bottom:4px;padding-bottom:10px}
+
+/* ── 헤더 ── */
+header{position:fixed;inset:0 0 auto 156px;z-index:20;padding:13px 16px 10px;pointer-events:none}
+header>*{pointer-events:auto}
+.brand{display:inline-flex;align-items:baseline;gap:9px;background:var(--card);
+       border:2px solid var(--line2);border-radius:999px;padding:7px 16px;
+       box-shadow:0 3px 0 rgba(140,120,90,.16)}
+.brand h1{font-size:18px}
+.brand span{font-size:11.5px;color:var(--ink3);font-weight:600}
+.bar{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
+.chip{border:2px solid var(--line2);background:var(--card);color:var(--ink2);font:inherit;
+      font-size:12.5px;font-weight:800;padding:6px 12px;border-radius:999px;cursor:pointer;
+      transition:.14s;box-shadow:0 2px 0 rgba(140,120,90,.14)}
+.chip:hover{transform:translateY(-1px)}
+.chip.on{color:#fff;border-color:transparent;box-shadow:0 2px 0 rgba(0,0,0,.14)}
+.chip.ktx.on{background:var(--hot)} .chip.trn.on{background:var(--ink2)}
+.chip.reg.on{background:var(--green)}
+.gap{width:8px}
+
+/* ── 지도 ── */
+#wrap{position:fixed;inset:0;touch-action:none;cursor:grab}
+#wrap.drag{cursor:grabbing}
+svg{width:100%;height:100%;display:block}
+.prov{stroke:#fff;stroke-width:2.4;stroke-linejoin:round}
+.plabel{font-size:15px;font-weight:800;fill:#7C6E5B;opacity:.75;pointer-events:none;
+        text-anchor:middle;paint-order:stroke;stroke:#fff;stroke-width:3.5}
+.stn{pointer-events:none}
+.stn circle{stroke:#fff;stroke-width:1.6}
+.stn text{font-size:9px;font-weight:800;fill:#5A5148;text-anchor:middle;
+          paint-order:stroke;stroke:#fff;stroke-width:2.6}
+.spot{cursor:pointer}
+.spot .disc{fill:#fff;stroke-width:2.6}
+.spot .emo{font-size:19px;text-anchor:middle;dominant-baseline:central;pointer-events:none}
+.spot .nm{font-size:10.5px;font-weight:800;text-anchor:middle;fill:var(--ink);
+          paint-order:stroke;stroke:#fff;stroke-width:3;pointer-events:none}
+.spot:hover .disc{stroke-width:4}
+.spot.sel .disc{stroke:var(--gold);stroke-width:4.5}
+
+/* ── 확대/축소 ── */
+.zoom{position:fixed;right:14px;bottom:14px;z-index:20;display:grid;gap:6px}
+.zoom button{width:38px;height:38px;border-radius:12px;border:2px solid var(--line2);
+             background:var(--card);font-size:17px;font-weight:800;color:var(--ink2);cursor:pointer;
+             box-shadow:0 2px 0 rgba(140,120,90,.16)}
+
+/* ── 패널 ── */
+.panel{position:fixed;z-index:30;right:14px;top:78px;bottom:14px;width:360px;background:var(--card);
+       border:2px solid var(--line2);border-radius:20px;box-shadow:0 12px 32px rgba(70,55,35,.18);
+       overflow:auto;transform:translateX(calc(100% + 24px));transition:transform .3s cubic-bezier(.2,.8,.3,1)}
+.panel.open{transform:none}
+.hero{position:relative;height:164px;background:var(--blue-bg);border-radius:17px 17px 0 0;overflow:hidden}
+.hero img{width:100%;height:100%;object-fit:cover;display:block}
+.hero .none{display:flex;height:100%;align-items:center;justify-content:center;font-size:54px;opacity:.55}
+.close{position:absolute;top:9px;right:9px;width:31px;height:31px;border-radius:50%;border:none;
+       background:rgba(255,255,255,.94);cursor:pointer;font-size:16px;color:var(--ink2);
+       box-shadow:0 2px 6px rgba(0,0,0,.18)}
+.pbody{padding:15px 17px 22px}
+.ptitle{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.ptitle h2{font-size:19px}
+.tag{font-size:10.5px;font-weight:800;padding:3px 9px;border-radius:999px}
+.addr{font-size:12px;color:var(--ink3);margin-top:6px}
+.desc{font-size:13.5px;line-height:1.6;color:var(--ink2);margin-top:11px}
+.sec{margin-top:17px}
+.sec h3{font-size:11px;letter-spacing:.1em;color:var(--ink3);margin-bottom:8px}
+.go{display:grid;gap:6px}
+.go div{display:flex;align-items:center;gap:9px;font-size:13px;background:var(--bg);
+        border:1.5px solid var(--line);border-radius:11px;padding:8px 11px}
+.go b{margin-left:auto;font-variant-numeric:tabular-nums}
+.list{display:grid;gap:5px}
+.list a{display:flex;align-items:baseline;gap:7px;text-decoration:none;color:inherit;font-size:13px;
+        padding:8px 11px;border-radius:11px;border:1.5px solid var(--line);background:var(--card)}
+.list a:hover{background:var(--gold-bg);border-color:var(--gold)}
+.list .n{font-weight:700} .list .c{font-size:11px;color:var(--ink3)}
+.list .d{margin-left:auto;font-size:11px;color:var(--ink3);font-variant-numeric:tabular-nums}
+.more{display:inline-block;margin-top:11px;font-size:12px;color:var(--blue);font-weight:800;text-decoration:none}
+.err{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:30px;z-index:50;
+     background:var(--bg);text-align:center;font-size:14px;line-height:1.7;color:var(--ink2)}
+
+@media (max-width:760px){
+  .side{left:8px;right:8px;top:auto;bottom:8px;width:auto;height:auto;max-height:38%;
+        flex-direction:row;flex-wrap:wrap;gap:5px;padding:10px}
+  .side h2{display:none} .side button{width:auto} .side .all{border:none;margin:0;padding:8px 10px}
+  header{inset:0 0 auto 0}
+  .panel{right:8px;left:8px;width:auto;top:auto;height:52%;bottom:8px}
+  .brand h1{font-size:16px} .chip{font-size:11.5px;padding:5px 10px}
+}
+</style>
+</head>
+<body>
+
+<div id="wrap"><svg id="map" aria-label="대한민국 여행 지도"></svg></div>
+
+<nav class="side" id="side"></nav>
+
+<header>
+  <div class="brand"><h1>🧳 어디 갈까</h1><span>우리나라 여행 지도</span></div>
+  <div class="bar" id="bar"></div>
+</header>
+
+<div class="zoom">
+  <button id="zin" aria-label="확대">＋</button>
+  <button id="zout" aria-label="축소">－</button>
+  <button id="zfit" aria-label="전체보기" style="font-size:13px">전체</button>
+</div>
+
+<aside class="panel" id="panel"></aside>
+
+<script>
+const ICON={바다:"🏖️",마을:"🏘️",자연:"🌿",시장:"🍢",역사:"🏛️",전망:"🗼",카페:"☕"};
+const HUE ={바다:"--blue",마을:"--hot",자연:"--green",시장:"--gold",역사:"--grape",전망:"--blue",카페:"--hot"};
+const FILL=[["서울","#FFD9E1"],["부산","#CDE8FF"],["대구","#FFE7C2"],["인천","#D6F0E4"],
+            ["광주","#E9DFFF"],["대전","#FFE2D2"],["울산","#D3EDF8"],["세종","#F1E7D4"],
+            ["경기","#E4EFDA"],["강원","#DAEBF8"],["충청북","#FFF1CE"],["충청남","#FFE1E1"],
+            ["전라북","#E1F3EA"],["전라남","#DAE9FF"],["경상북","#FFEBD8"],["경상남","#E7E1F9"],
+            ["제주","#FFDEE9"]];
+const NS="http://www.w3.org/2000/svg";
+
+let K,P=[],ST={},state={ktx:false,trn:false,region:null,sel:null},view={x:0,y:0,z:1},box;
+
+const el=(t,a={})=>{const n=document.createElementNS(NS,t);
+  for(const k in a) n.setAttribute(k,a[k]); return n;};
+const fail=m=>document.body.insertAdjacentHTML("beforeend",`<div class="err"><div>${m}</div></div>`);
+
+async function boot(){
+  const V=Date.now();   // 캐시 무시
+  const [k,p,s]=await Promise.all([
+    fetch("data/korea.json?v="+V).then(r=>r.json()).catch(()=>null),
+    fetch("data/places.json?v="+V).then(r=>r.json()).catch(()=>null),
+    fetch("data/stations.json?v="+V).then(r=>r.json()).catch(()=>({})),
+  ]);
+  if(!k) return fail("<b>data/korea.json</b> 이 없어요.<br>먼저 <code>python build_map.py</code> 를 실행해 주세요.");
+  if(!p) return fail("<b>data/places.json</b> 이 없어요.<br>먼저 <code>python collect.py</code> 를 실행해 주세요.");
+  K=k; P=p.places; ST=s||{};
+  box=k.viewBox.split(" ").map(Number);
+  draw(); bar(); side(); fit();
+}
+
+// 위경도 → SVG 좌표
+const prj=(lat,lng)=>{const {lon0,lat1,k,coslat}=K.proj;
+  return [(lng-lon0)*k,(lat1-lat)*k/coslat];};
+
+function draw(){
+  const svg=document.getElementById("map");
+  svg.setAttribute("viewBox",K.viewBox);
+  svg.innerHTML="";
+  const g=el("g",{id:"cam"}); svg.appendChild(g);
+
+  // 바다 배경 + 시도
+  g.appendChild(el("rect",{x:-400,y:-400,width:box[2]+800,height:box[3]+800,fill:"var(--sea)"}));
+  const land=el("g"); g.appendChild(land);
+  K.provinces.forEach(pv=>{
+    const f=(FILL.find(([n])=>pv.name.startsWith(n))||[,"#E9E3D8"])[1];
+    land.appendChild(el("path",{d:pv.d,fill:f,class:"prov"}));
+  });
+  const SHORT={"충청북도":"충북","충청남도":"충남","전라북도":"전북","전북특별자치도":"전북",
+               "전라남도":"전남","경상북도":"경북","경상남도":"경남","강원특별자치도":"강원",
+               "제주특별자치도":"제주","경기도":"경기","강원도":"강원"};
+  K.provinces.forEach(pv=>{
+    const city=/시$/.test(pv.name);
+    const t=el("text",{x:pv.cx,y:pv.cy,class:"plabel"});
+    if(city) t.setAttribute("style","font-size:11px;opacity:.6");
+    t.textContent=SHORT[pv.name]||pv.name.replace(/특별자치시|광역시|특별시/,"");
+    land.appendChild(t);
+  });
+
+  g.appendChild(el("g",{id:"stn"}));
+  g.appendChild(el("g",{id:"spot"}));
+  render();
+}
+
+// 광역시는 지도엔 그대로 두고, 사이드바에서는 인접 도에 묶는다
+const GROUP={부산:"경남",울산:"경남",대구:"경북",광주:"전남",대전:"충남",세종:"충남",강원:"강원도"};
+const grp=p=>GROUP[p.region]||p.region;
+const ORDER=["서울","경기","인천","강원도","충남","충북","경북","경남","전북","전남","제주"];
+
+function bar(){
+  const b=document.getElementById("bar");
+  b.innerHTML=`<button class="chip ktx" data-l="ktx">🚄 KTX역</button>
+    <button class="chip trn" data-l="trn">🚂 기차역</button>`;
+  b.onclick=e=>{const t=e.target.closest("button"); if(!t) return;
+    state[t.dataset.l]=!state[t.dataset.l];
+    t.classList.toggle("on",state[t.dataset.l]); render();};
+}
+
+function side(){
+  const cnt={}; P.forEach(p=>cnt[grp(p)]=(cnt[grp(p)]||0)+1);
+  const list=ORDER.filter(r=>cnt[r]);
+  const n=document.getElementById("side");
+  n.innerHTML=`<h2>지역</h2>
+    <button class="all on" data-r="">전국 <em>${P.length}</em></button>`
+    +list.map(r=>`<button data-r="${r}">${r} <em>${cnt[r]}</em></button>`).join("");
+  n.onclick=e=>{const t=e.target.closest("button"); if(!t) return;
+    state.region=t.dataset.r||null;
+    [...n.querySelectorAll("button")].forEach(b=>
+      b.classList.toggle("on",(b.dataset.r||null)===state.region));
+    closePanel(); zoomRegion(); };
+}
+
+// 선택한 지역이 화면에 꽉 차도록
+function zoomRegion(){
+  const list=P.filter(p=>!state.region||grp(p)===state.region);
+  if(!list.length) return fit();
+  if(!state.region) return fit();
+  const pts=list.map(p=>prj(p.lat,p.lng));
+  const x0=Math.min(...pts.map(p=>p[0])), x1=Math.max(...pts.map(p=>p[0]));
+  const y0=Math.min(...pts.map(p=>p[1])), y1=Math.max(...pts.map(p=>p[1]));
+  const pad=70, w=Math.max(x1-x0,60)+pad*2, h=Math.max(y1-y0,60)+pad*2;
+  const z=Math.min(9,Math.max(1,Math.min(box[2]/w,box[3]/h)));
+  view.z=z;
+  view.x=box[2]/2-((x0+x1)/2)*z;
+  view.y=box[3]/2-((y0+y1)/2)*z;
+  apply();
+}
+
+function render(){
+  const s=1/view.z, sg=document.getElementById("stn"), pg=document.getElementById("spot");
+  sg.innerHTML=""; pg.innerHTML="";
+
+  const layers=[[state.ktx,"KTX","var(--hot)",3.6],[state.trn,"기차","#8A8078",2.8]];
+  layers.forEach(([on,kind,color,r])=>{
+    if(!on) return;
+    (ST[kind]||[]).forEach(st=>{
+      const [x,y]=prj(st.lat,st.lng);
+      const g=el("g",{class:"stn",transform:`translate(${x} ${y}) scale(${s})`});
+      g.appendChild(el("circle",{r:r,fill:color}));
+      if(view.z>=1.7||kind==="KTX"&&view.z>=1.2){
+        const t=el("text",{y:-r-4}); t.textContent=st.name.replace(/역$/,"");
+        g.appendChild(t);
+      }
+      sg.appendChild(g);
+    });
+  });
+
+  P.filter(p=>!state.region||grp(p)===state.region).forEach(p=>{
+    const [x,y]=prj(p.lat,p.lng), c=`var(${HUE[p.cat]||"--blue"})`;
+    const g=el("g",{class:"spot"+(state.sel===p.id?" sel":""),
+                    transform:`translate(${x} ${y}) scale(${s})`});
+    g.appendChild(el("circle",{r:15,class:"disc",stroke:c}));
+    const e=el("text",{class:"emo",y:1}); e.textContent=ICON[p.cat]||"📍"; g.appendChild(e);
+    const t=el("text",{class:"nm",y:29}); t.textContent=p.name; g.appendChild(t);
+    g.onclick=ev=>{ev.stopPropagation(); open(p);};
+    pg.appendChild(g);
+  });
+}
+
+/* ── 팬 · 줌 ── */
+const cam=()=>document.getElementById("cam");
+function apply(){cam().setAttribute("transform",
+  `translate(${view.x} ${view.y}) scale(${view.z})`); render();}
+function fit(){view={x:0,y:0,z:1}; apply();}
+function zoom(f,cx,cy){
+  const w=document.getElementById("wrap").getBoundingClientRect();
+  cx=cx??w.width/2; cy=cy??w.height/2;
+  const sc=box[2]/w.width, mx=cx*sc, my=cy*sc;
+  const z2=Math.min(9,Math.max(1,view.z*f));
+  view.x=mx-(mx-view.x)*(z2/view.z); view.y=my-(my-view.y)*(z2/view.z); view.z=z2;
+  if(z2===1){view.x=0;view.y=0;} apply();
+}
+const wrap=document.getElementById("wrap");
+wrap.addEventListener("wheel",e=>{e.preventDefault();
+  const r=wrap.getBoundingClientRect();
+  zoom(e.deltaY<0?1.18:1/1.18,e.clientX-r.left,e.clientY-r.top);},{passive:false});
+let drag=null;
+wrap.addEventListener("pointerdown",e=>{drag={x:e.clientX,y:e.clientY,vx:view.x,vy:view.y};
+  wrap.classList.add("drag"); wrap.setPointerCapture(e.pointerId);});
+wrap.addEventListener("pointermove",e=>{if(!drag)return;
+  const sc=box[2]/wrap.getBoundingClientRect().width;
+  view.x=drag.vx+(e.clientX-drag.x)*sc; view.y=drag.vy+(e.clientY-drag.y)*sc; apply();});
+addEventListener("pointerup",()=>{drag=null;wrap.classList.remove("drag");});
+document.getElementById("zin").onclick=()=>zoom(1.5);
+document.getElementById("zout").onclick=()=>zoom(1/1.5);
+document.getElementById("zfit").onclick=fit;
+wrap.addEventListener("click",e=>{if(e.target.tagName!=="circle"&&!e.target.closest(".spot")) closePanel();});
+
+/* ── 상세 패널 ── */
+function open(p){
+  state.sel=p.id;
+  const go=[];
+  if(p.subway) go.push(`<div>🚇 <span>${p.subway.name}</span><b>${p.subway.dist}m</b></div>`);
+  if(p.station?.KTX) go.push(`<div>🚄 <span>${p.station.KTX.name}</span><b>${p.station.KTX.km}km</b></div>`);
+  if(p.station?.["기차"]) go.push(`<div>🚂 <span>${p.station["기차"].name}</span><b>${p.station["기차"].km}km</b></div>`);
+  const li=(a,cat)=>a.map(f=>`<a href="${f.url}" target="_blank" rel="noopener"><span class="n">${f.name}</span>
+      ${cat&&f.cat?`<span class="c">${f.cat}</span>`:""}<span class="d">${f.dist}m</span></a>`).join("");
+  const h=HUE[p.cat]||"--blue";
+  document.getElementById("panel").innerHTML=`
+    <div class="hero">${p.img?`<img src="${p.img}" alt="${p.name}">`:`<div class="none">${ICON[p.cat]||"📍"}</div>`}
+      <button class="close" onclick="closePanel()">✕</button></div>
+    <div class="pbody">
+      <div class="ptitle"><h2>${p.name}</h2>
+        <span class="tag" style="background:var(${h}-bg);color:var(${h})">${ICON[p.cat]||""} ${p.cat}</span>
+        <span class="tag" style="background:var(--bg);color:var(--ink3)">${p.region}</span></div>
+      <p class="addr">${p.addr||""}</p>
+      ${p.desc?`<p class="desc">${p.desc}</p>`:""}
+      ${go.length?`<div class="sec"><h3>가는 법</h3><div class="go">${go.join("")}</div></div>`:""}
+      ${p.food?.length?`<div class="sec"><h3>주변 맛집</h3><div class="list">${li(p.food,1)}</div></div>`:""}
+      ${p.cafe?.length?`<div class="sec"><h3>주변 카페</h3><div class="list">${li(p.cafe,0)}</div></div>`:""}
+      ${p.wiki?`<a class="more" href="${p.wiki}" target="_blank" rel="noopener">위키백과에서 더 보기 →</a>`:""}
+    </div>`;
+  document.getElementById("panel").classList.add("open");
+  render();
+}
+function closePanel(){state.sel=null;document.getElementById("panel").classList.remove("open");render();}
+window.closePanel=closePanel;
+
+boot();
+</script>
+</body>
+</html>
