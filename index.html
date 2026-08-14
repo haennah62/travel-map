@@ -591,8 +591,11 @@ function initKakao(){
   if(!window.kakao||!kakao.maps) return;
   kakao.maps.load(()=>{ try{ KPS=new kakao.maps.services.Places(); }catch(e){} });
 }
-function kakaoSearch(q,cb){
-  if(!KPS) return cb([]);
+function kakaoSearch(q,cb,tries=0){
+  if(!KPS){                                       // SDK 로딩 전이면 잠깐 기다렸다 재시도
+    if(tries<20) return setTimeout(()=>kakaoSearch(q,cb,tries+1),150);
+    return cb([]);
+  }
   const seq=++kqSeq;
   KPS.keywordSearch(q,(data,st)=>{
     if(seq!==kqSeq) return;                       // 늦게 온 응답 버림
@@ -620,39 +623,49 @@ function search(q){
   return hit.slice(0,40);
 }
 
-function drawResults(q){
-  const box=document.getElementById("sbox"), res=document.getElementById("res");
-  box.classList.toggle("has",!!q);
-  if(!q){res.classList.remove("on");res.innerHTML="";return;}
-  const hit=search(q);
-  if(!hit.length){res.innerHTML=`<div class="none">"${q}" 찾는 중…<br>
-    <span style="font-size:11.5px">전국 검색 결과를 기다리고 있어요.</span></div>`;
-    res.classList.add("on");return;}
-  let last="",h="";
-  hit.forEach((v,i)=>{
-    if(v.kind!==last){h+=`<div class="rg">${v.kind}</div>`;last=v.kind;}
-    h+=`<button data-i="${i}"><span class="e">${v.emo}</span>
-      <span><span class="t">${v.name}</span><span class="m">${v.sub}</span></span>
+const esc=t=>String(t).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const rowHTML=(v,i)=>`<button data-i="${i}"><span class="e">${v.emo}</span>
+      <span><span class="t">${esc(v.name)}</span><span class="m">${esc(v.sub)}</span></span>
       <span class="star ${isFav(v.k)?"on":""}" data-f="${i}" style="margin-left:auto">★</span></button>`;
-  });
-  res.innerHTML=h; res.classList.add("on"); res._hit=hit;
 
-  // 전국 검색 결과를 이어서 붙인다
+function drawResults(q){
+  const sb=document.getElementById("sbox"), res=document.getElementById("res");
+  sb.classList.toggle("has",!!q);
+  if(!q){res.classList.remove("on");res.innerHTML="";return;}
+
+  // 1) 내장 데이터(관광지 + 주변 맛집·카페·놀거리) 먼저 그린다.
+  //    종류가 바뀔 때마다 헤더를 넣으면 관련도순 정렬 때문에 같은 헤더가 여러 번 나온다
+  //    → 종류별로 묶어 헤더는 한 번씩만, 묶음 순서·묶음 안 순서는 관련도 그대로.
+  const hit=search(q);
+  res._hit=hit;
+  const kinds=[]; hit.forEach(v=>{if(!kinds.includes(v.kind)) kinds.push(v.kind);});
+  let h="";
+  kinds.forEach(kind=>{
+    h+=`<div class="rg">${kind}</div>`;
+    hit.forEach((v,i)=>{if(v.kind===kind) h+=rowHTML(v,i);});
+  });
+  h+=`<div class="none" id="pend">전국에서 더 찾는 중…</div>`;
+  res.innerHTML=h; res.classList.add("on");
+
+  // 2) 내장에 없어도 전국 검색은 항상 이어서 붙인다 (여기서 return 하면 안 됨)
   kakaoSearch(q,ext=>{
     if(document.getElementById("q").value.trim()!==q) return;
-    const seen=new Set(hit.map(v=>norm(v.name)+Math.round(v.lat*1e4)));
-    const add=ext.filter(v=>!seen.has(norm(v.name)+Math.round(v.lat*1e4)));
-    if(!add.length) return;
-    const all=hit.concat(add); res._hit=all;
-    let hh=res.innerHTML.replace(/<div class="none">[\s\S]*?<\/div>/,"");
-    hh+=`<div class="rg">전국 검색</div>`;
-    add.forEach((v,i)=>{
-      const gi=hit.length+i;
-      hh+=`<button data-i="${gi}"><span class="e">${v.emo}</span>
-        <span><span class="t">${v.name}</span><span class="m">${v.sub}</span></span>
-        <span class="star ${isFav(v.k)?"on":""}" data-f="${gi}" style="margin-left:auto">★</span></button>`;
-    });
-    res.innerHTML=hh; res.classList.add("on");
+    const key=v=>norm(v.name)+Math.round(v.lat*1e4);
+    const seen=new Set(hit.map(key));
+    const add=ext.filter(v=>!seen.has(key(v)));
+    const pend=document.getElementById("pend");
+    if(!pend) return;
+    if(!add.length){                      // 전국에도 없으면 대기 문구를 결과 없음으로 바꾼다
+      pend.outerHTML = hit.length ? "" :
+        `<div class="none">"${esc(q)}" 에 맞는 곳이 없어요.<br>
+         <span style="font-size:11.5px">관광지 이름이나 그 주변 가게 이름으로 찾아보세요.</span></div>`;
+      return;
+    }
+    res._hit=hit.concat(add);
+    let hh=`<div class="rg">전국 검색</div>`;
+    add.forEach((v,i)=>{hh+=rowHTML(v,hit.length+i);});
+    pend.outerHTML=hh;
+    res.classList.add("on");
   });
 }
 
