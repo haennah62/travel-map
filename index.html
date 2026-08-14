@@ -227,7 +227,7 @@ svg{width:100%;height:100%;display:block}
   <div class="bar" id="bar"></div>
   <div class="searchbox" id="sbox">
     <span class="ico">🔍</span>
-    <input id="q" type="search" placeholder="관광지 · 맛집 · 카페 이름으로 찾기" autocomplete="off">
+    <input id="q" type="search" placeholder="어디로 갈까요? 가게 이름·주소로 찾기" autocomplete="off">
     <button class="clr" id="qclr" aria-label="지우기">✕</button>
     <div class="results" id="res"></div>
   </div>
@@ -244,6 +244,7 @@ svg{width:100%;height:100%;display:block}
 <div class="sheet" id="sheet"><div class="card" id="sheetBody"></div></div>
 <div class="toast" id="toast"></div>
 
+<script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=c89f0e69e80770459ec3bf5baa4680f2&autoload=false&libraries=services"></script>
 <script>
 const ICON={바다:"🏖️",마을:"🏘️",자연:"🌿",시장:"🍢",역사:"🏛️",전망:"🗼",카페:"☕"};
 const HUE ={바다:"--blue",마을:"--hot",자연:"--green",시장:"--gold",역사:"--grape",전망:"--blue",카페:"--hot"};
@@ -274,7 +275,7 @@ async function boot(){
   if(!p) return fail("<b>data/places.json</b> 이 없어요.<br>먼저 <code>python collect.py</code> 를 실행해 주세요.");
   K=k; P=p.places; ST=s||{};
   box=k.viewBox.split(" ").map(Number);
-  loadLists(); buildIndex(); draw(); bar(); side(); fit(); wireUI(); readShare();
+  loadLists(); buildIndex(); initKakao(); draw(); bar(); side(); fit(); wireUI(); readShare();
 }
 
 // 위경도 → SVG 좌표
@@ -550,6 +551,29 @@ function buildIndex(){
 }
 const norm=t=>t.replace(/\s/g,"").toLowerCase();
 
+/* ── 전국 검색 (카카오) — 내 데이터에 없는 곳까지 ── */
+let KPS=null, kqSeq=0;
+function initKakao(){
+  if(!window.kakao||!kakao.maps) return;
+  kakao.maps.load(()=>{ try{ KPS=new kakao.maps.services.Places(); }catch(e){} });
+}
+function kakaoSearch(q,cb){
+  if(!KPS) return cb([]);
+  const seq=++kqSeq;
+  KPS.keywordSearch(q,(data,st)=>{
+    if(seq!==kqSeq) return;                       // 늦게 온 응답 버림
+    if(st!==kakao.maps.services.Status.OK) return cb([]);
+    cb(data.slice(0,12).map(d=>({
+      k:"kk:"+d.id, name:d.place_name,
+      sub:(d.category_group_name||d.category_name.split(">").pop().trim()||"장소")
+          +" · "+(d.road_address_name||d.address_name||""),
+      emo:KEMO[d.category_group_code]||"📌",
+      lat:+d.y, lng:+d.x, url:d.place_url, kind:"전국 검색"})));
+  },{size:12});
+}
+const KEMO={FD6:"🍽️",CE7:"☕",AT4:"🗺️",CT1:"🎭",AD5:"🏨",SW8:"🚇",PK6:"🅿️",
+            MT1:"🛒",CS2:"🏪",OL7:"⛽",HP8:"🏥",PM9:"💊",BK9:"🏦",AC5:"🏫"};
+
 function search(q){
   const n=norm(q); if(n.length<1) return [];
   const hit=IDX.filter(v=>norm(v.name).includes(n)||norm(v.sub).includes(n));
@@ -567,8 +591,8 @@ function drawResults(q){
   box.classList.toggle("has",!!q);
   if(!q){res.classList.remove("on");res.innerHTML="";return;}
   const hit=search(q);
-  if(!hit.length){res.innerHTML=`<div class="none">"${q}" 에 맞는 곳이 없어요.<br>
-    <span style="font-size:11.5px">관광지 이름이나 그 주변 가게 이름으로 찾아보세요.</span></div>`;
+  if(!hit.length){res.innerHTML=`<div class="none">"${q}" 찾는 중…<br>
+    <span style="font-size:11.5px">전국 검색 결과를 기다리고 있어요.</span></div>`;
     res.classList.add("on");return;}
   let last="",h="";
   hit.forEach((v,i)=>{
@@ -578,6 +602,24 @@ function drawResults(q){
       <span class="star ${isFav(v.k)?"on":""}" data-f="${i}" style="margin-left:auto">★</span></button>`;
   });
   res.innerHTML=h; res.classList.add("on"); res._hit=hit;
+
+  // 전국 검색 결과를 이어서 붙인다
+  kakaoSearch(q,ext=>{
+    if(document.getElementById("q").value.trim()!==q) return;
+    const seen=new Set(hit.map(v=>norm(v.name)+Math.round(v.lat*1e4)));
+    const add=ext.filter(v=>!seen.has(norm(v.name)+Math.round(v.lat*1e4)));
+    if(!add.length) return;
+    const all=hit.concat(add); res._hit=all;
+    let hh=res.innerHTML.replace(/<div class="none">[\s\S]*?<\/div>/,"");
+    hh+=`<div class="rg">전국 검색</div>`;
+    add.forEach((v,i)=>{
+      const gi=hit.length+i;
+      hh+=`<button data-i="${gi}"><span class="e">${v.emo}</span>
+        <span><span class="t">${v.name}</span><span class="m">${v.sub}</span></span>
+        <span class="star ${isFav(v.k)?"on":""}" data-f="${gi}" style="margin-left:auto">★</span></button>`;
+    });
+    res.innerHTML=hh; res.classList.add("on");
+  });
 }
 
 /* ── 검색 결과 선택 → 지도 이동 ── */
