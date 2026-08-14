@@ -60,6 +60,10 @@ header>*{pointer-events:auto}
 #wrap.drag{cursor:grabbing}
 svg{width:100%;height:100%;display:block}
 .prov{stroke:#fff;stroke-width:2.4;stroke-linejoin:round}
+.city{fill:none;stroke:#fff;stroke-opacity:.85;stroke-linejoin:round;pointer-events:none}
+.clabel{font-size:13px;font-weight:800;fill:#6B6152;text-anchor:middle;pointer-events:none;
+        paint-order:stroke;stroke:#fff;stroke-width:4;stroke-opacity:.95}
+.zoomed .plabel.pv{opacity:.28}
 .plabel{font-size:15px;font-weight:800;fill:#7C6E5B;opacity:.75;pointer-events:none;
         text-anchor:middle;paint-order:stroke;stroke:#fff;stroke-width:3.5}
 .stn{pointer-events:none}
@@ -258,7 +262,7 @@ const hav=(a,b,c,d)=>{const R=6371,r=Math.PI/180,
   x=Math.sin((c-a)*r/2)**2+Math.cos(a*r)*Math.cos(c*r)*Math.sin((d-b)*r/2)**2;
   return 2*R*Math.asin(Math.sqrt(x));};
 
-let K,P=[],ST={},ME=null,state={ktx:false,trn:false,region:null,sel:null},view={x:0,y:0,z:1},box;
+let K,P=[],ST={},CT=[],ME=null,state={ktx:false,trn:false,region:null,sel:null},view={x:0,y:0,z:1},box;
 
 const el=(t,a={})=>{const n=document.createElementNS(NS,t);
   for(const k in a) n.setAttribute(k,a[k]); return n;};
@@ -266,14 +270,15 @@ const fail=m=>document.body.insertAdjacentHTML("beforeend",`<div class="err"><di
 
 async function boot(){
   const V=Date.now();   // 캐시 무시
-  const [k,p,s]=await Promise.all([
+  const [k,p,s,c]=await Promise.all([
     fetch("data/korea.json?v="+V).then(r=>r.json()).catch(()=>null),
     fetch("data/places.json?v="+V).then(r=>r.json()).catch(()=>null),
     fetch("data/stations.json?v="+V).then(r=>r.json()).catch(()=>({})),
+    fetch("data/cities.json?v="+V).then(r=>r.json()).catch(()=>[]),
   ]);
   if(!k) return fail("<b>data/korea.json</b> 이 없어요.<br>먼저 <code>python build_map.py</code> 를 실행해 주세요.");
   if(!p) return fail("<b>data/places.json</b> 이 없어요.<br>먼저 <code>python collect.py</code> 를 실행해 주세요.");
-  K=k; P=p.places; ST=s||{};
+  K=k; P=p.places; ST=s||{}; CT=c||[];
   box=k.viewBox.split(" ").map(Number);
   loadLists(); buildIndex(); initKakao(); draw(); bar(); side(); fit(); wireUI(); readShare();
 }
@@ -303,9 +308,11 @@ function draw(){
     const t=el("text",{x:pv.cx,y:pv.cy,class:"plabel"});
     if(city) t.setAttribute("style","font-size:11px;opacity:.6");
     t.textContent=SHORT[pv.name]||pv.name.replace(/특별자치시|광역시|특별시/,"");
+    t.classList.add("pv");
     land.appendChild(t);
   });
 
+  g.appendChild(el("g",{id:"city"}));
   g.appendChild(el("g",{id:"stn"}));
   g.appendChild(el("g",{id:"spot"}));
   g.appendChild(el("g",{id:"me"}));
@@ -367,10 +374,31 @@ function ppu(){
 }
 
 function render(){
+  document.getElementById("map").classList.toggle("zoomed",view.z>=2.6);
   // k를 곱하면 화면상 크기가 기기·배율과 무관하게 일정해진다
   const k=1/(ppu()*view.z);
   const sg=document.getElementById("stn"), pg=document.getElementById("spot");
-  sg.innerHTML=""; pg.innerHTML="";
+  const cg=document.getElementById("city");
+  sg.innerHTML=""; pg.innerHTML=""; cg.innerHTML="";
+
+  // ── 시·군·구 : 확대하면 경계선, 더 확대하면 지역명 ──
+  if(view.z>=1.8 && CT.length){
+    const inView=c=>{                       // 화면 안에 있는 것만 그린다
+      const r=wrap.getBoundingClientRect(), sc=box[2]/r.width;
+      const x=c.cx*view.z+view.x, y=c.cy*view.z+view.y;
+      const m=140;
+      return x>-m && y>-m && x<r.width*sc+m && y<r.height*sc+m;
+    };
+    const show=CT.filter(inView);
+    show.forEach(c=>cg.appendChild(el("path",{d:c.d,class:"city",
+      "stroke-width":Math.max(0.6,1.4*k)})));
+    if(view.z>=2.6) show.forEach(c=>{
+      const t=el("text",{x:c.cx,y:c.cy,class:"clabel",
+        transform:`translate(${c.cx} ${c.cy}) scale(${k}) translate(${-c.cx} ${-c.cy})`});
+      t.textContent=c.name.replace(/(특별자치)?[시군구]$/,"")||c.name;
+      cg.appendChild(t);
+    });
+  }
 
   // ── 기차역 (교통수단으로 여행지 고르는 용도 → 크게) ──
   const layers=[[state.ktx,"KTX","var(--hot)",11,13],
