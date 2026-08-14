@@ -63,6 +63,15 @@ header>*{pointer-events:auto}
 .fchip.on{background:var(--gold);border-style:solid;border-color:transparent;color:#fff}
 .fchip.on em{color:rgba(255,255,255,.85)}
 .fchip.add{border-color:var(--line2);color:var(--ink3)}
+
+/* ── 공유 폴더 상태 (시트 안) ── */
+.mem{margin-top:12px;padding:11px 13px;border:1.5px solid var(--line);border-radius:13px;background:var(--bg)}
+.mem .mt{font-size:12.5px;font-weight:800;color:var(--ink2)}
+.mem .own{font-size:11px;font-weight:700;color:var(--ink3);margin-left:5px}
+.mem .mlist{display:flex;gap:5px;flex-wrap:wrap;margin-top:7px}
+.mem .mchip{font-size:11.5px;font-weight:700;color:var(--ink2);background:var(--card);
+            border:1.5px solid var(--line2);border-radius:999px;padding:3px 9px}
+.items .who{font-size:10.5px;color:var(--ink3);margin-left:5px}
 .gap{width:8px}
 
 /* ── 지도 ── */
@@ -294,7 +303,10 @@ async function boot(){
   if(!p) return fail("<b>data/places.json</b> 이 없어요.<br>먼저 <code>python collect.py</code> 를 실행해 주세요.");
   K=k; P=p.places; ST=s||{}; CT=c||[];
   box=k.viewBox.split(" ").map(Number);
-  loadLists(); buildIndex(); initKakao(); draw(); bar(); side(); fit(); wireUI(); readShare();
+  loadLists(); buildIndex(); initKakao();
+  draw(); bar(); side(); fit(); wireUI();
+  await sbInit();          // 설정이 비어 있으면 즉시 반환 — 게스트 모드
+  readShare();
 }
 
 // 위경도 → SVG 좌표
@@ -385,7 +397,7 @@ function folders(){
   n.style.display = state.fav ? "flex" : "none";
   if(!state.fav) return;
   n.innerHTML = LISTS.map((l,i)=>
-      `<button class="fchip${i===openList?" on":""}" data-i="${i}">${esc(l.name)} <em>${l.items.length}</em></button>`
+      `<button class="fchip${i===openList?" on":""}" data-i="${i}">${l.remote?"🤝 ":""}${esc(l.name)} <em>${l.items.length}</em></button>`
     ).join("") + `<button class="fchip add" id="fadd">＋ 새 폴더</button>`;
 }
 
@@ -685,7 +697,15 @@ document.getElementById("zfit").onclick=fit;
 
 
 /* ══════════ 검색 · 즐겨찾기 · 저장 리스트 ══════════ */
-const LS="whereto.lists.v1", LSC="whereto.folder.v1";
+/* ══════════ 공유 폴더 설정 ══════════
+   아래 두 줄이 비어 있으면 공유 기능은 꺼진 채로, 지금까지와 똑같이 동작한다
+   (저장은 이 브라우저에만). Supabase 프로젝트를 만들고 값을 채우면 켜진다.
+   anon 키는 공개돼도 되는 키다 — 실제 권한은 DB의 RLS 규칙이 판단한다.
+   설정 방법: supabase/설치가이드.md                                        */
+const SB_URL = "";
+const SB_KEY = "";
+
+const LS="whereto.lists.v1", LSC="whereto.folder.v1", LSN="whereto.name.v1";
 let LISTS=[], IDX=[];
 
 const toast=m=>{const t=document.getElementById("toast");t.textContent=m;t.classList.add("on");
@@ -695,7 +715,8 @@ const loadLists=()=>{try{LISTS=JSON.parse(localStorage.getItem(LS))||[];}catch(e
   if(!LISTS.length) LISTS=[{id:"d",name:"가고 싶은 곳",items:[]}];
   const i=LISTS.findIndex(l=>l.id===localStorage.getItem(LSC));   // 지난번에 열어둔 폴더 복원
   openList=i>=0?i:0;};
-const saveLists=()=>{try{localStorage.setItem(LS,JSON.stringify(LISTS));
+// 공유 폴더(remote)는 서버가 원본이므로 브라우저에 저장하지 않는다 — 로컬 폴더만 저장
+const saveLists=()=>{try{localStorage.setItem(LS,JSON.stringify(LISTS.filter(l=>!l.remote)));
   localStorage.setItem(LSC,(LISTS[openList]||LISTS[0]||{}).id||"");}catch(e){}};
 const curList=()=>LISTS[openList]||LISTS[0]||{name:"",items:[]};
 const curItems=()=>curList().items;                  // 지금 폴더
@@ -824,10 +845,13 @@ function toggleFav(v){
   if(at>=0){
     cur.items.splice(at,1);
     toast(`"${cur.name}" 에서 뺐어요`);
+    if(cur.remote) sbDel(cur,v.k);              // 공유 폴더면 서버에서도 뺀다
   }else{
     const dup=LISTS.some((l,i)=>i!==openList && l.items.some(x=>x.k===v.k));
-    cur.items.push({k:v.k,name:v.name,sub:v.sub,emo:v.emo,lat:v.lat,lng:v.lng,url:v.url||""});
+    const it={k:v.k,name:v.name,sub:v.sub,emo:v.emo,lat:v.lat,lng:v.lng,url:v.url||"",by:MYNAME};
+    cur.items.push(it);
     toast(dup ? `"${cur.name}" 에도 담았어요` : `"${cur.name}" 에 담았어요`);
+    if(cur.remote) sbAdd(cur,it);
   }
   saveLists();
   if(state.fav && !curItems().length){   // 폴더를 비우면 빈 지도가 되므로 전체로 되돌린다
@@ -860,16 +884,28 @@ function sheet(show=true){
     </div>
     <div class="items">
       ${L.items.length? L.items.map(it=>`<a href="${it.url||"#"}" ${it.url?'target="_blank" rel="noopener"':""}>
-          <span>${it.emo||"📍"}</span><span><b>${it.name}</b><br>
-          <span style="font-size:11px;color:var(--ink3)">${it.sub||""}</span></span>
+          <span>${it.emo||"📍"}</span><span><b>${esc(it.name)}</b>${it.by?`<span class="who">${esc(it.by)} 님이 담음</span>`:""}<br>
+          <span style="font-size:11px;color:var(--ink3)">${esc(it.sub||"")}</span></span>
           <span class="d2"></span><button class="rm" data-rm="${it.k}">✕</button></a>`).join("")
         : `<p style="font-size:13px;color:var(--ink3);padding:10px 2px">
              "${esc(L.name)}" 폴더가 비어 있어요. 관광지나 맛집 옆의 ★ 을 눌러 담아보세요.</p>`}
     </div>
+    ${shareOn()?`<div class="mem">${L.remote
+        ? `<div class="mt">🤝 함께 보는 폴더 · ${(L.members||[]).length}명
+             ${L.mine?`<span class="own">내가 만듦</span>`:""}</div>
+           <div class="mlist">${(L.members||[]).map(m=>
+              `<span class="mchip">${esc(m.nickname||"이름없음")}${m.role==="owner"?" 👑":""}</span>`
+             ).join("")}</div>`
+        : `<div class="mt">🔒 나만 보는 폴더 — 이 브라우저에만 저장됩니다</div>`}</div>`:""}
     <div class="shbtn">
       <button class="pri" id="mapfav">🗺️ 이 폴더 지도에서 보기</button>
-      <button id="shr">🔗 이 폴더 링크로 공유</button>
+      ${shareOn()
+        ? `<button id="shf">${L.remote?"🔗 초대 링크 복사":"🤝 이 폴더 공유하기"}</button>`
+        : `<button id="shr">🔗 이 폴더 링크로 공유</button>`}
     </div>
+    ${shareOn()&&L.remote&&!L.mine
+      ? `<div class="shbtn" style="grid-template-columns:1fr;margin-top:8px">
+           <button id="lv">이 폴더에서 나가기</button></div>`:""}
     <div class="shbtn" style="grid-template-columns:1fr;margin-top:8px">
       <button id="cls">닫기</button>
     </div>`;
@@ -889,6 +925,8 @@ function shareList(){
     .catch(()=>{prompt("이 링크를 복사해 보내세요",url);});
 }
 function readShare(){
+  const j=location.hash.match(/#join=([A-Za-z0-9_-]+)/);     // 공유 폴더 초대 링크
+  if(j){ history.replaceState(null,"",location.pathname); joinFolder(j[1]); return; }
   const m=location.hash.match(/#share=(.+)$/); if(!m) return;
   try{
     const d=b64d(m[1]);
@@ -922,6 +960,8 @@ function wireUI(){
     const t=e.target;
     if(t.id==="cls") return sheet(false);
     if(t.id==="shr") return shareList();
+    if(t.id==="shf") return shareFolder();
+    if(t.id==="lv")  return leaveFolder(curList());
     if(t.id==="mapfav"){ sheet(false); return favOnly(true); }
     if(t.id==="addl"){
       const v=document.getElementById("newl").value.trim();
@@ -959,6 +999,166 @@ function wireUI(){
     if(t.id==="fadd") return addFolder();
     pickFolder(+t.dataset.i);
   });
+}
+
+/* ══════════ 공유 폴더 (Supabase) ══════════
+   설정이 비어 있으면 이 블록은 통째로 잠자고, 앱은 지금까지와 똑같이 동작한다.
+   권한은 전부 DB의 RLS가 판단한다 — 여기 코드는 편의일 뿐 보안 경계가 아니다. */
+let SB=null, ME_ID=null, MYNAME=localStorage.getItem(LSN)||"", SBCH=null;
+const shareOn=()=>!!SB;
+
+const loadScript=src=>new Promise((ok,no)=>{
+  const s=document.createElement("script"); s.src=src; s.onload=ok; s.onerror=no;
+  document.head.appendChild(s);
+});
+
+async function sbInit(){
+  if(!SB_URL||!SB_KEY) return;                       // 게스트 모드
+  try{
+    await loadScript("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2");
+    SB=window.supabase.createClient(SB_URL,SB_KEY,
+        {auth:{persistSession:true,autoRefreshToken:true}});
+    const {data:{session}}=await SB.auth.getSession();
+    if(session){ ME_ID=session.user.id; await sbLoad(); }
+  }catch(e){ SB=null; }                              // 실패해도 앱은 그대로 쓴다
+}
+
+// 저장·공유를 실제로 쓸 때만 조용히 익명 계정을 만든다(로그인 화면 없음)
+async function sbSignIn(){
+  if(!SB) return false;
+  const {data:{session}}=await SB.auth.getSession();
+  if(session){ ME_ID=session.user.id; return true; }
+  const {data,error}=await SB.auth.signInAnonymously();
+  if(error){ toast("연결에 실패했어요. 잠시 후 다시 시도해 주세요"); return false; }
+  ME_ID=data.user.id; return true;
+}
+
+function askName(hint){
+  if(MYNAME) return MYNAME;
+  const n=(prompt(`이 폴더에서 쓸 내 이름 (예: ${hint})`,"")||"").trim().slice(0,12);
+  if(n){ MYNAME=n; try{localStorage.setItem(LSN,n);}catch(e){} }
+  return MYNAME;
+}
+
+// 서버의 내 폴더 전부를 읽어 LISTS 에 합친다. 로컬 폴더는 그대로 둔다.
+async function sbLoad(){
+  if(!SB||!ME_ID) return;
+  const {data:fs,error}=await SB.from("folders").select("id,name,owner,invite_code");
+  if(error||!fs) return;
+  const ids=fs.map(f=>f.id);
+  let ps=[], ms=[];
+  if(ids.length){
+    ps=(await SB.from("places").select("*").in("folder_id",ids)).data||[];
+    ms=(await SB.from("folder_members")
+          .select("folder_id,user_id,nickname,role").in("folder_id",ids)).data||[];
+  }
+  const curId=(LISTS[openList]||{}).id;
+  LISTS=LISTS.filter(l=>!l.remote).concat(fs.map(f=>({
+    id:f.id, name:f.name, remote:true, code:f.invite_code, mine:f.owner===ME_ID,
+    members:ms.filter(m=>m.folder_id===f.id),
+    items:ps.filter(p=>p.folder_id===f.id).map(p=>({
+      k:p.k,name:p.name,sub:p.sub,emo:p.emo,lat:p.lat,lng:p.lng,url:p.url,by:p.added_name}))
+  })));
+  const i=LISTS.findIndex(l=>l.id===curId);
+  openList=i>=0?i:0;
+  saveLists(); sbWatch(); folders(); render();
+}
+
+async function sbAdd(f,it){
+  if(!await sbSignIn()) return;
+  const {error}=await SB.from("places").insert({
+    folder_id:f.id,k:it.k,name:it.name,sub:it.sub||null,emo:it.emo||null,
+    url:it.url||null,lat:it.lat,lng:it.lng,added_by:ME_ID,added_name:MYNAME||null});
+  if(error && error.code!=="23505"){               // 23505 = 이미 담김(동시 저장)
+    f.items=f.items.filter(x=>x.k!==it.k);
+    render(); folders(); toast("저장에 실패했어요");
+  }
+}
+
+async function sbDel(f,k){
+  if(!await sbSignIn()) return;
+  const {error}=await SB.from("places").delete().eq("folder_id",f.id).eq("k",k);
+  if(error){ toast("빼기에 실패했어요"); sbLoad(); }
+}
+
+// 로컬 폴더를 공유 폴더로 올린다(담긴 곳도 함께)
+async function shareFolder(){
+  const f=curList();
+  if(f.remote) return invite(f);                   // 이미 공유 중이면 링크만
+  if(!SB) return toast("공유 기능이 아직 연결되지 않았어요");
+  if(!await sbSignIn()) return;
+  if(!askName("해나")) return;
+  const {data,error}=await SB.from("folders").insert({name:f.name,owner:ME_ID})
+                             .select("id,invite_code").single();
+  if(error) return toast("폴더를 만들지 못했어요");
+  if(f.items.length){
+    await SB.from("places").insert(f.items.map(it=>({
+      folder_id:data.id,k:it.k,name:it.name,sub:it.sub||null,emo:it.emo||null,
+      url:it.url||null,lat:it.lat,lng:it.lng,added_by:ME_ID,added_name:MYNAME})));
+  }
+  await SB.from("folder_members").update({nickname:MYNAME})
+          .eq("folder_id",data.id).eq("user_id",ME_ID);
+  LISTS=LISTS.filter(l=>l!==f);                    // 로컬본은 서버본으로 대체
+  await sbLoad();
+  const i=LISTS.findIndex(l=>l.id===data.id); if(i>=0) openList=i;
+  saveLists(); folders(); render(); sheet();
+  invite(curList());
+}
+
+function invite(f){
+  if(!f||!f.code) return;
+  const url=location.origin+location.pathname+"#join="+f.code;
+  (navigator.clipboard?navigator.clipboard.writeText(url):Promise.reject())
+    .then(()=>toast("초대 링크를 복사했어요 — 카톡으로 보내세요"))
+    .catch(()=>prompt("이 링크를 복사해 보내세요",url));
+}
+
+// 초대 링크로 들어오기
+async function joinFolder(code){
+  if(!SB) return toast("공유 기능이 아직 연결되지 않았어요");
+  if(!await sbSignIn()) return;
+  if(!askName("남편")) return toast("이름을 입력해야 폴더에 들어갈 수 있어요");
+  const {data,error}=await SB.rpc("join_folder",{code,nick:MYNAME});
+  if(error) return toast("초대 링크가 올바르지 않거나 만료됐어요");
+  await sbLoad();
+  const i=LISTS.findIndex(l=>l.id===data);
+  if(i>=0){ openList=i; saveLists(); }
+  state.fav=true; state.region=null; closePanel(); folders(); fitFav();
+  toast(`"${curList().name}" 폴더에 들어왔어요`);
+}
+
+async function leaveFolder(f){
+  if(!SB||!f.remote) return;
+  if(!confirm(`"${f.name}" 폴더에서 나갈까요? (내 화면에서만 사라집니다)`)) return;
+  await SB.from("folder_members").delete().eq("folder_id",f.id).eq("user_id",ME_ID);
+  await sbLoad(); openList=0; saveLists(); state.fav=false;
+  folders(); render(); sheet();
+}
+
+// 상대가 담거나 빼면 내 화면에 바로 반영. RLS 덕에 권한 없는 폴더는 애초에 안 온다.
+function sbWatch(){
+  if(!SB) return;
+  if(SBCH){ SB.removeChannel(SBCH); SBCH=null; }
+  if(!LISTS.some(l=>l.remote)) return;
+  SBCH=SB.channel("folder-sync")
+    .on("postgres_changes",{event:"*",schema:"public",table:"places"},p=>{
+      const row=(p.new&&p.new.folder_id)?p.new:p.old;
+      if(!row||!row.folder_id) return;
+      const f=LISTS.find(l=>l.id===row.folder_id); if(!f) return;
+      if(p.eventType==="INSERT"){
+        if(f.items.some(x=>x.k===row.k)) return;
+        f.items.push({k:row.k,name:row.name,sub:row.sub,emo:row.emo,
+                      lat:row.lat,lng:row.lng,url:row.url,by:row.added_name});
+        if(row.added_by!==ME_ID)
+          toast(`${row.added_name||"누군가"} 님이 "${row.name}" 을 담았어요`);
+      }else if(p.eventType==="DELETE"){
+        f.items=f.items.filter(x=>x.k!==row.k);
+      }else return;
+      render(); folders();
+      if(document.getElementById("sheet").classList.contains("on")) sheet();
+    })
+    .on("postgres_changes",{event:"*",schema:"public",table:"folder_members"},()=>sbLoad())
+    .subscribe();
 }
 
 /* ── 내 위치 ── */
