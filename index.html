@@ -53,6 +53,16 @@ header>*{pointer-events:auto}
 .chip.on{color:#fff;border-color:transparent;box-shadow:0 2px 0 rgba(0,0,0,.14)}
 .chip.ktx.on{background:var(--hot)} .chip.trn.on{background:var(--ink2)}
 .chip.reg.on{background:var(--green)} .chip.favonly.on{background:var(--gold)}
+
+/* ── 폴더 줄 (⭐만 보기 켰을 때만) ── */
+.folders{display:none;gap:6px;margin-top:8px;flex-wrap:wrap;align-items:center}
+.fchip{border:2px dashed var(--gold);background:var(--card);color:var(--ink2);font:inherit;
+       font-size:12px;font-weight:800;padding:5px 11px;border-radius:999px;cursor:pointer;
+       display:inline-flex;align-items:center;gap:5px}
+.fchip em{font-style:normal;font-size:11px;color:var(--ink3);font-variant-numeric:tabular-nums}
+.fchip.on{background:var(--gold);border-style:solid;border-color:transparent;color:#fff}
+.fchip.on em{color:rgba(255,255,255,.85)}
+.fchip.add{border-color:var(--line2);color:var(--ink3)}
 .gap{width:8px}
 
 /* ── 지도 ── */
@@ -64,6 +74,7 @@ svg{width:100%;height:100%;display:block}
 .clabel{font-size:13px;font-weight:800;fill:#6B6152;text-anchor:middle;pointer-events:none;
         paint-order:stroke;stroke:#fff;stroke-width:4;stroke-opacity:.95}
 .zoomed .plabel.pv{opacity:.28}
+.favmode .plabel{display:none}          /* ⭐만 보기: 크게 번진 시도 이름이 마커를 덮는다 */
 .plabel{font-size:15px;font-weight:800;fill:#7C6E5B;opacity:.75;pointer-events:none;
         text-anchor:middle;paint-order:stroke;stroke:#fff;stroke-width:3.5}
 .stn{pointer-events:none}
@@ -237,6 +248,7 @@ svg{width:100%;height:100%;display:block}
     <button class="clr" id="qclr" aria-label="지우기">✕</button>
     <div class="results" id="res"></div>
   </div>
+  <div class="folders" id="folders"></div>
 </header>
 
 <div class="zoom">
@@ -341,11 +353,11 @@ function bar(){
     t.classList.toggle("on",state[t.dataset.l]); render();};
 }
 
-/* ── ⭐만 보기 : 저장한 곳만 지도에 남긴다 ── */
-// 저장한 곳 = 관광지(P에 있는 것) + 검색으로 담은 맛집·카페·놀거리·전국검색 지점
+/* ── ⭐만 보기 : 지금 연 폴더의 장소만 지도에 남긴다 ── */
+// 폴더에 담긴 것 = 관광지(P에 있는 것) + 검색으로 담은 맛집·카페·놀거리·전국검색 지점
 function favPoints(){
   const byId=new Map(P.map(p=>[p.id,p]));
-  return allItems().map(it=>{
+  return curItems().map(it=>{
     const p=byId.get(it.k);
     return p ? {lat:p.lat,lng:p.lng,place:p}
              : (it.lat!=null ? {lat:+it.lat,lng:+it.lng,item:it} : null);
@@ -353,16 +365,41 @@ function favPoints(){
 }
 
 function favOnly(on){
-  const pts=favPoints();
-  if(!state.fav && !pts.length)
+  const want = on===undefined ? !state.fav : !!on;
+  if(want && !allItems().length)
     return toast("저장한 곳이 없어요 — 검색 결과나 상세 화면의 ★ 을 눌러보세요");
-  state.fav = on===undefined ? !state.fav : !!on;
+  state.fav=want;
   if(state.fav){                       // 지역 필터와 겹치면 아무것도 안 보이므로 전국으로 되돌린다
     state.region=null;
     document.querySelectorAll("#side button").forEach(b=>b.classList.toggle("on",!b.dataset.r));
+    if(!curItems().length) toast(`"${curList().name}" 폴더가 비어 있어요 — 아래에서 폴더를 골라보세요`);
   }
-  closePanel();
+  closePanel(); folders();
   state.fav ? fitFav() : (render(), fit());
+}
+
+/* ── 폴더 줄 : ⭐만 보기를 켰을 때만 헤더에 뜬다 ── */
+function folders(){
+  const n=document.getElementById("folders");
+  if(!n) return;
+  n.style.display = state.fav ? "flex" : "none";
+  if(!state.fav) return;
+  n.innerHTML = LISTS.map((l,i)=>
+      `<button class="fchip${i===openList?" on":""}" data-i="${i}">${esc(l.name)} <em>${l.items.length}</em></button>`
+    ).join("") + `<button class="fchip add" id="fadd">＋ 새 폴더</button>`;
+}
+
+function pickFolder(i){
+  openList=i; saveLists(); closePanel(); folders(); fitFav();
+  if(!curItems().length) toast(`"${curList().name}" 폴더가 비어 있어요 — ★ 을 눌러 담아보세요`);
+}
+
+function addFolder(){
+  const v=(prompt("새 폴더 이름 (예: 여름휴가, 당일치기)","")||"").trim();
+  if(!v) return;
+  LISTS.push({id:"l"+Date.now(),name:v.slice(0,20),items:[]});
+  openList=LISTS.length-1; saveLists(); folders(); render();
+  toast(`"${v.slice(0,20)}" 폴더를 만들었어요 — ★ 을 누르면 여기에 담깁니다`);
 }
 
 // 저장한 곳 전체가 화면에 들어오도록 맞춘다.
@@ -381,12 +418,16 @@ function fitFav(){
 
   const x0=Math.min(...pts.map(p=>p[0])), x1=Math.max(...pts.map(p=>p[0]));
   const y0=Math.min(...pts.map(p=>p[1])), y1=Math.max(...pts.map(p=>p[1]));
-  const pad=70, lbl=70;                             // lbl = 마커 아래 이름표 자리
-  const w=Math.max(x1-x0,40)+pad*2, h=Math.max(y1-y0,40)+pad*2+lbl;
-  view.z = pts.length===1 ? Math.max(view.z,6)
-                          : Math.min(9,Math.max(1,Math.min(aw/w,ah/h)));
+  // 여백은 '화면 픽셀' 기준으로 잡는다 — viewBox 고정값으로 두면 좁은 범위(한 동네)에서
+  // 여백이 배율을 눌러 마커가 서로 겹친 채 멈춘다.
+  const padV=64*sc, lblV=44*sc;                     // 마커 여백 · 이름표 자리
+  const spanX=Math.max(x1-x0,1e-9), spanY=Math.max(y1-y0,1e-9);
+  // 한 동네에 몰린 폴더(예: 서울 3곳)는 크게 당겨야 마커가 서로 안 겹친다.
+  // 그만큼 확대하면 시도·시군구 이름표가 화면을 덮으므로 ⭐만 보기에선 그 이름표를 숨긴다.
+  view.z = pts.length===1 ? 12
+         : Math.min(26, Math.max(1, Math.min((aw-padV*2)/spanX, (ah-padV*2-lblV)/spanY)));
   view.x=cx-((x0+x1)/2)*view.z;
-  view.y=cy-((y0+y1)/2+lbl/2)*view.z;               // 남는 여백을 아래쪽에 준다
+  view.y=cy-lblV/2-((y0+y1)/2)*view.z;              // 남는 여백을 이름표 쪽(아래)에 준다
   apply();
 }
 
@@ -429,6 +470,7 @@ function ppu(){
 
 function render(){
   document.getElementById("map").classList.toggle("zoomed",view.z>=2.6);
+  document.getElementById("map").classList.toggle("favmode",state.fav);
   // k를 곱하면 화면상 크기가 기기·배율과 무관하게 일정해진다
   const k=1/(ppu()*view.z);
   const sg=document.getElementById("stn"), pg=document.getElementById("spot");
@@ -477,14 +519,14 @@ function render(){
   // ── ⭐만 보기 칩 상태·개수 갱신 ──
   const fb=document.getElementById("favOnly");
   if(fb){
-    const n=allItems().length;
+    const n=state.fav ? curItems().length : allItems().length;
     fb.textContent = n ? `⭐만 보기 ${n}` : "⭐만 보기";
     fb.classList.toggle("on",state.fav);
   }
 
   // ── 관광지 : 배율에 따라 점 → 아이콘 → 아이콘+이름 ──
   // ⭐만 보기는 개수가 적으니 배율과 무관하게 아이콘(+이름)으로 — 점으로 찍으면 찾기 어렵다
-  const mode = state.fav ? (allItems().length<=25 ? "full" : "icon")
+  const mode = state.fav ? (curItems().length<=25 ? "full" : "icon")
                          : (view.z<2 ? "dot" : (view.z<3.2 ? "icon" : "full"));
   const shown = state.fav ? P.filter(p=>isFav(p.id))
                           : P.filter(p=>!state.region||grp(p)===state.region);
@@ -509,7 +551,7 @@ function render(){
   // ── ⭐만 보기: 검색으로 담은 맛집·카페·전국검색 지점도 함께 (관광지가 아니라 P에 없다) ──
   if(state.fav){
     const ids=new Set(P.map(p=>p.id));
-    allItems().filter(it=>!ids.has(it.k)&&it.lat!=null).forEach(it=>{
+    curItems().filter(it=>!ids.has(it.k)&&it.lat!=null).forEach(it=>{
       const [x,y]=prj(+it.lat,+it.lng);
       const g=el("g",{class:"spot saved",transform:`translate(${x} ${y}) scale(${k})`});
       if(mode==="dot"){
@@ -643,16 +685,22 @@ document.getElementById("zfit").onclick=fit;
 
 
 /* ══════════ 검색 · 즐겨찾기 · 저장 리스트 ══════════ */
-const LS="whereto.lists.v1";
+const LS="whereto.lists.v1", LSC="whereto.folder.v1";
 let LISTS=[], IDX=[];
 
 const toast=m=>{const t=document.getElementById("toast");t.textContent=m;t.classList.add("on");
   clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove("on"),1700);};
+/* 저장 목록은 '폴더'다 — 여러 개를 만들어 나눠 담고, 지도·공유는 지금 연 폴더 하나만 다룬다. */
 const loadLists=()=>{try{LISTS=JSON.parse(localStorage.getItem(LS))||[];}catch(e){LISTS=[];}
-  if(!LISTS.length) LISTS=[{id:"d",name:"가고 싶은 곳",items:[]}];};
-const saveLists=()=>{try{localStorage.setItem(LS,JSON.stringify(LISTS));}catch(e){}};
-const allItems=()=>LISTS.flatMap(l=>l.items);
-const isFav=k=>allItems().some(i=>i.k===k);
+  if(!LISTS.length) LISTS=[{id:"d",name:"가고 싶은 곳",items:[]}];
+  const i=LISTS.findIndex(l=>l.id===localStorage.getItem(LSC));   // 지난번에 열어둔 폴더 복원
+  openList=i>=0?i:0;};
+const saveLists=()=>{try{localStorage.setItem(LS,JSON.stringify(LISTS));
+  localStorage.setItem(LSC,(LISTS[openList]||LISTS[0]||{}).id||"");}catch(e){}};
+const curList=()=>LISTS[openList]||LISTS[0]||{name:"",items:[]};
+const curItems=()=>curList().items;                  // 지금 폴더
+const allItems=()=>LISTS.flatMap(l=>l.items);        // 전 폴더 합계
+const isFav=k=>curItems().some(i=>i.k===k);          // ★ 는 '지금 폴더에 담겼나'
 
 /* ── 검색 인덱스: 관광지 + 주변 맛집·카페·놀거리 ── */
 function buildIndex(){
@@ -769,21 +817,23 @@ function goTo(v){
 }
 
 /* ── 즐겨찾기 토글 ── */
+// ★ 은 '지금 연 폴더'에만 담고 뺀다 — 다른 폴더의 같은 장소는 건드리지 않는다
 function toggleFav(v){
-  const cur=LISTS[0];
-  const at=allItems().findIndex(i=>i.k===v.k);
+  const cur=curList();
+  const at=cur.items.findIndex(i=>i.k===v.k);
   if(at>=0){
-    LISTS.forEach(l=>l.items=l.items.filter(i=>i.k!==v.k));
-    toast("저장 목록에서 뺐어요");
+    cur.items.splice(at,1);
+    toast(`"${cur.name}" 에서 뺐어요`);
   }else{
+    const dup=LISTS.some((l,i)=>i!==openList && l.items.some(x=>x.k===v.k));
     cur.items.push({k:v.k,name:v.name,sub:v.sub,emo:v.emo,lat:v.lat,lng:v.lng,url:v.url||""});
-    toast(`"${cur.name}" 에 담았어요`);
+    toast(dup ? `"${cur.name}" 에도 담았어요` : `"${cur.name}" 에 담았어요`);
   }
   saveLists();
-  if(state.fav && !allItems().length){   // 마지막 하나를 빼면 빈 지도가 되므로 전체로 되돌린다
-    state.fav=false; toast("저장한 곳이 없어 전체 지도로 돌아왔어요");
+  if(state.fav && !curItems().length){   // 폴더를 비우면 빈 지도가 되므로 전체로 되돌린다
+    state.fav=false; toast(`"${cur.name}" 폴더가 비어 전체 지도로 돌아왔어요`);
   }
-  render();
+  render(); folders();
   const q=document.getElementById("q").value.trim(); if(q) drawResults(q);
   if(state.sel){const p=P.find(v2=>v2.id===state.sel); if(p) open(p);}
 }
@@ -795,17 +845,18 @@ function sheet(show=true){
   if(!show){sh.classList.remove("on");return;}
   const L=LISTS[openList]||LISTS[0];
   document.getElementById("sheetBody").innerHTML=`
-    <h2>⭐ 저장한 곳</h2>
-    <p class="sub2">목록을 만들어 나눠 담고, 친구에게 링크로 보낼 수 있어요.</p>
+    <h2>⭐ 내 폴더</h2>
+    <p class="sub2">폴더로 나눠 담고, 폴더 하나를 통째로 링크로 보낼 수 있어요.
+      ★ 을 누르면 <b>지금 고른 폴더</b>에 담깁니다.</p>
     ${LISTS.map((l,i)=>`<div class="lrow ${i===openList?"on":""}">
-        <span class="nm2" data-open="${i}">${l.name}</span>
+        <span class="nm2" data-open="${i}">${esc(l.name)}</span>
         <span class="ct">${l.items.length}</span>
         <button data-ren="${i}" title="이름 바꾸기">✏️</button>
         ${LISTS.length>1?`<button data-del="${i}" title="삭제">🗑️</button>`:""}
       </div>`).join("")}
     <div class="mk">
-      <input id="newl" placeholder="새 목록 이름 (예: 여름 휴가)" maxlength="20">
-      <button id="addl">추가</button>
+      <input id="newl" placeholder="새 폴더 이름 (예: 여름휴가, 당일치기)" maxlength="20">
+      <button id="addl">폴더 추가</button>
     </div>
     <div class="items">
       ${L.items.length? L.items.map(it=>`<a href="${it.url||"#"}" ${it.url?'target="_blank" rel="noopener"':""}>
@@ -813,11 +864,11 @@ function sheet(show=true){
           <span style="font-size:11px;color:var(--ink3)">${it.sub||""}</span></span>
           <span class="d2"></span><button class="rm" data-rm="${it.k}">✕</button></a>`).join("")
         : `<p style="font-size:13px;color:var(--ink3);padding:10px 2px">
-             아직 담은 곳이 없어요. 관광지나 맛집 옆의 ★ 을 눌러보세요.</p>`}
+             "${esc(L.name)}" 폴더가 비어 있어요. 관광지나 맛집 옆의 ★ 을 눌러 담아보세요.</p>`}
     </div>
     <div class="shbtn">
-      <button class="pri" id="mapfav">🗺️ 지도에서 보기</button>
-      <button id="shr">🔗 링크 복사해 공유</button>
+      <button class="pri" id="mapfav">🗺️ 이 폴더 지도에서 보기</button>
+      <button id="shr">🔗 이 폴더 링크로 공유</button>
     </div>
     <div class="shbtn" style="grid-template-columns:1fr;margin-top:8px">
       <button id="cls">닫기</button>
@@ -842,11 +893,12 @@ function readShare(){
   try{
     const d=b64d(m[1]);
     const items=d.i.map(a=>({k:"sh:"+a[0]+a[1],name:a[0],lat:a[1],lng:a[2],emo:a[3],sub:a[4]}));
-    if(!LISTS.some(l=>l.name===d.n+" (공유받음)"))
-      LISTS.push({id:"s"+Date.now(),name:d.n+" (공유받음)",items});
-    saveLists(); openList=LISTS.length-1;
+    const nm=d.n+" (공유받음)";
+    let i=LISTS.findIndex(l=>l.name===nm);
+    if(i<0){ LISTS.push({id:"s"+Date.now(),name:nm,items}); i=LISTS.length-1; }
+    openList=i; saveLists();              // 받은 폴더를 현재 폴더로 (저장 순서 주의)
     history.replaceState(null,"",location.pathname);
-    setTimeout(()=>{sheet(true);toast(`"${d.n}" 목록을 받았어요`);},600);
+    setTimeout(()=>{sheet(true);folders();toast(`"${d.n}" 폴더를 받았어요`);},600);
   }catch(e){}
 }
 
@@ -874,23 +926,38 @@ function wireUI(){
     if(t.id==="addl"){
       const v=document.getElementById("newl").value.trim();
       if(!v) return; LISTS.push({id:"l"+Date.now(),name:v,items:[]});
-      openList=LISTS.length-1; saveLists(); sheet(); return;
+      openList=LISTS.length-1; saveLists(); sheet(); folders(); render();
+      toast(`"${v}" 폴더를 만들었어요 — ★ 을 누르면 여기에 담깁니다`); return;
     }
-    if(t.dataset.open!=null){openList=+t.dataset.open;sheet();return;}
+    if(t.dataset.open!=null){                 // 폴더 전환 — ⭐만 보기 중이면 지도도 따라간다
+      openList=+t.dataset.open; saveLists(); sheet(); folders();
+      state.fav ? fitFav() : render(); return;
+    }
     if(t.dataset.ren!=null){
-      const i=+t.dataset.ren, v=prompt("목록 이름",LISTS[i].name);
-      if(v&&v.trim()){LISTS[i].name=v.trim();saveLists();sheet();} return;
+      const i=+t.dataset.ren, v=prompt("폴더 이름",LISTS[i].name);
+      if(v&&v.trim()){LISTS[i].name=v.trim().slice(0,20);saveLists();sheet();folders();} return;
     }
     if(t.dataset.del!=null){
       const i=+t.dataset.del;
-      if(confirm(`"${LISTS[i].name}" 목록을 지울까요?`)){
-        LISTS.splice(i,1); openList=0; saveLists(); sheet(); render();
+      if(confirm(`"${LISTS[i].name}" 폴더를 담긴 ${LISTS[i].items.length}곳과 함께 지울까요?`)){
+        LISTS.splice(i,1); openList=0; saveLists(); sheet(); folders();
+        if(state.fav && !curItems().length) state.fav=false;
+        state.fav ? fitFav() : (render(), folders());
       } return;
     }
     if(t.dataset.rm){
-      LISTS[openList].items=LISTS[openList].items.filter(x=>x.k!==t.dataset.rm);
-      saveLists(); sheet(); render(); return;
+      curList().items=curItems().filter(x=>x.k!==t.dataset.rm);
+      saveLists(); sheet(); folders();
+      if(state.fav && !curItems().length){ state.fav=false; folders(); }
+      render(); return;
     }
+  });
+
+  // 폴더 줄 (⭐만 보기 켰을 때만 보임)
+  document.getElementById("folders").addEventListener("click",e=>{
+    const t=e.target.closest("button"); if(!t) return;
+    if(t.id==="fadd") return addFolder();
+    pickFolder(+t.dataset.i);
   });
 }
 
