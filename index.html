@@ -64,15 +64,15 @@ svg{width:100%;height:100%;display:block}
         text-anchor:middle;paint-order:stroke;stroke:#fff;stroke-width:3.5}
 .stn{pointer-events:none}
 .stn circle{stroke:#fff;stroke-width:1.6}
-.stn text{font-size:9px;font-weight:800;fill:#5A5148;text-anchor:middle;
-          paint-order:stroke;stroke:#fff;stroke-width:2.6}
+.stn text{font-weight:900;fill:#2E2A26;text-anchor:middle;
+          paint-order:stroke;stroke:#fff;stroke-width:4.5}
 .spot{cursor:pointer}
-.spot .disc{fill:#fff;stroke-width:2.6}
-.spot .emo{font-size:19px;text-anchor:middle;dominant-baseline:central;pointer-events:none}
-.spot .nm{font-size:10.5px;font-weight:800;text-anchor:middle;fill:var(--ink);
-          paint-order:stroke;stroke:#fff;stroke-width:3;pointer-events:none}
-.spot:hover .disc{stroke-width:4}
-.spot.sel .disc{stroke:var(--gold);stroke-width:4.5}
+.spot .disc{fill:#fff;stroke-width:3.4}
+.spot .emo{font-size:24px;text-anchor:middle;dominant-baseline:central;pointer-events:none}
+.spot .nm{font-size:13px;font-weight:800;text-anchor:middle;fill:var(--ink);
+          paint-order:stroke;stroke:#fff;stroke-width:4;pointer-events:none}
+.spot:hover .disc{stroke-width:5}
+.spot.sel .disc{stroke:var(--gold);stroke-width:6}
 
 /* ── 확대/축소 ── */
 .zoom{position:fixed;right:14px;bottom:14px;z-index:20;display:grid;gap:6px}
@@ -132,7 +132,7 @@ svg{width:100%;height:100%;display:block}
          border-width:2px 0 0}
   .panel.open{transform:none}
   .hero{height:150px;border-radius:18px 18px 0 0}
-  .spot .nm{font-size:12px}
+  .spot .nm{font-size:12.5px}
 }
 </style>
 </head>
@@ -262,36 +262,54 @@ function zoomRegion(){
   apply();
 }
 
+// 화면에 실제로 그려지는 배율 (viewBox → CSS 픽셀)
+function ppu(){
+  const r=wrap.getBoundingClientRect();
+  return Math.min(r.width/box[2], r.height/box[3]) || 1;
+}
+
 function render(){
-  const s=1/view.z, sg=document.getElementById("stn"), pg=document.getElementById("spot");
+  // k를 곱하면 화면상 크기가 기기·배율과 무관하게 일정해진다
+  const k=1/(ppu()*view.z);
+  const sg=document.getElementById("stn"), pg=document.getElementById("spot");
   sg.innerHTML=""; pg.innerHTML="";
 
-  const layers=[[state.ktx,"KTX","var(--hot)",3.6],[state.trn,"기차","#8A8078",2.8]];
-  layers.forEach(([on,kind,color,r])=>{
+  // ── 기차역 (교통수단으로 여행지 고르는 용도 → 크게) ──
+  const layers=[[state.ktx,"KTX","var(--hot)",11,13],
+                [state.trn,"기차","#6E655B",9,12]];
+  layers.forEach(([on,kind,color,r,fs])=>{
     if(!on) return;
     (ST[kind]||[]).forEach(st=>{
       const [x,y]=prj(st.lat,st.lng);
-      const g=el("g",{class:"stn",transform:`translate(${x} ${y}) scale(${s})`});
+      const g=el("g",{class:"stn",transform:`translate(${x} ${y}) scale(${k})`});
+      g.appendChild(el("circle",{r:r+3,fill:"#fff",opacity:.9}));
       g.appendChild(el("circle",{r:r,fill:color}));
-      if(view.z>=1.7||kind==="KTX"&&view.z>=1.2){
-        const t=el("text",{y:-r-4}); t.textContent=st.name.replace(/역$/,"");
+      g.appendChild(el("circle",{r:r*0.38,fill:"#fff"}));
+      if(view.z>=1.5){            // 전국 보기에선 점만, 조금 확대하면 역 이름
+        const t=el("text",{y:-r-7,style:`font-size:${fs}px`});
+        t.textContent=st.name.replace(/역$/,"");
         g.appendChild(t);
       }
       sg.appendChild(g);
     });
   });
 
+  // ── 관광지 ──
   P.filter(p=>!state.region||grp(p)===state.region).forEach(p=>{
     const [x,y]=prj(p.lat,p.lng), c=`var(${HUE[p.cat]||"--blue"})`;
     const g=el("g",{class:"spot"+(state.sel===p.id?" sel":""),
-                    transform:`translate(${x} ${y}) scale(${s})`});
-    g.appendChild(el("circle",{r:15,class:"disc",stroke:c}));
+                    transform:`translate(${x} ${y}) scale(${k})`});
+    g.appendChild(el("circle",{r:19,class:"disc",stroke:c}));
     const e=el("text",{class:"emo",y:1}); e.textContent=ICON[p.cat]||"📍"; g.appendChild(e);
-    const t=el("text",{class:"nm",y:29}); t.textContent=p.name; g.appendChild(t);
+    if(!(state.ktx||state.trn)||view.z>=2){   // 역 레이어 켜면 이름은 확대 후에
+      const t=el("text",{class:"nm",y:36}); t.textContent=p.name; g.appendChild(t);
+    }
     g.onclick=ev=>{ev.stopPropagation(); open(p);};
     pg.appendChild(g);
   });
 }
+
+addEventListener("resize",()=>{ if(K) render(); });
 
 /* ── 팬 · 줌 (마우스 휠 · 손가락 핀치 · 더블탭) ── */
 const cam=()=>document.getElementById("cam");
@@ -308,7 +326,7 @@ function zoomAt(f,cx,cy,rerender=true){
   const r=wrap.getBoundingClientRect();
   const sc=box[2]/r.width;
   const mx=cx*sc, my=cy*sc;
-  const z2=Math.min(12,Math.max(1,view.z*f));
+  const z2=Math.min(60,Math.max(1,view.z*f));
   if(z2===view.z) return;
   view.x=mx-(mx-view.x)*(z2/view.z);
   view.y=my-(my-view.y)*(z2/view.z);
