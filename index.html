@@ -114,12 +114,25 @@ svg{width:100%;height:100%;display:block}
      background:var(--bg);text-align:center;font-size:14px;line-height:1.7;color:var(--ink2)}
 
 @media (max-width:760px){
-  .side{left:8px;right:8px;top:auto;bottom:8px;width:auto;height:auto;max-height:38%;
-        flex-direction:row;flex-wrap:wrap;gap:5px;padding:10px}
-  .side h2{display:none} .side button{width:auto} .side .all{border:none;margin:0;padding:8px 10px}
-  header{inset:0 0 auto 0}
-  .panel{right:8px;left:8px;width:auto;top:auto;height:52%;bottom:8px}
-  .brand h1{font-size:16px} .chip{font-size:11.5px;padding:5px 10px}
+  .side{left:0;right:0;top:auto;bottom:0;width:auto;height:auto;max-height:none;border-radius:0;
+        border-width:2px 0 0;flex-direction:row;flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;
+        gap:6px;padding:9px 10px;scrollbar-width:none;box-shadow:0 -3px 14px rgba(70,55,35,.13)}
+  .side::-webkit-scrollbar{display:none}
+  .side h2{display:none}
+  .side button{width:auto;flex:0 0 auto;white-space:nowrap;padding:8px 13px;border-radius:999px;
+               border:1.5px solid var(--line2)}
+  .side button.on{border-color:transparent}
+  .side .all{border:1.5px solid var(--line2);margin:0;padding:8px 13px;border-radius:999px}
+  .zoom{right:10px;bottom:70px;gap:8px}
+  .zoom button{width:44px;height:44px;font-size:19px}
+  header{inset:0 0 auto 0;padding:10px 12px 8px}
+  .brand{padding:6px 13px}.brand h1{font-size:16px}.brand span{display:none}
+  .chip{font-size:11.5px;padding:5px 10px}
+  .panel{right:0;left:0;width:auto;top:auto;height:74%;bottom:0;border-radius:20px 20px 0 0;
+         border-width:2px 0 0}
+  .panel.open{transform:none}
+  .hero{height:150px;border-radius:18px 18px 0 0}
+  .spot .nm{font-size:12px}
 }
 </style>
 </head>
@@ -280,34 +293,100 @@ function render(){
   });
 }
 
-/* ── 팬 · 줌 ── */
+/* ── 팬 · 줌 (마우스 휠 · 손가락 핀치 · 더블탭) ── */
 const cam=()=>document.getElementById("cam");
-function apply(){cam().setAttribute("transform",
-  `translate(${view.x} ${view.y}) scale(${view.z})`); render();}
-function fit(){view={x:0,y:0,z:1}; apply();}
-function zoom(f,cx,cy){
-  const w=document.getElementById("wrap").getBoundingClientRect();
-  cx=cx??w.width/2; cy=cy??w.height/2;
-  const sc=box[2]/w.width, mx=cx*sc, my=cy*sc;
-  const z2=Math.min(9,Math.max(1,view.z*f));
-  view.x=mx-(mx-view.x)*(z2/view.z); view.y=my-(my-view.y)*(z2/view.z); view.z=z2;
-  if(z2===1){view.x=0;view.y=0;} apply();
-}
 const wrap=document.getElementById("wrap");
-wrap.addEventListener("wheel",e=>{e.preventDefault();
+
+function apply(rerender=true){
+  cam().setAttribute("transform",`translate(${view.x} ${view.y}) scale(${view.z})`);
+  if(rerender) render();
+}
+function fit(){view={x:0,y:0,z:1}; apply();}
+
+// (cx,cy)=화면 좌표 기준으로 f배 확대
+function zoomAt(f,cx,cy,rerender=true){
   const r=wrap.getBoundingClientRect();
-  zoom(e.deltaY<0?1.18:1/1.18,e.clientX-r.left,e.clientY-r.top);},{passive:false});
-let drag=null;
-wrap.addEventListener("pointerdown",e=>{drag={x:e.clientX,y:e.clientY,vx:view.x,vy:view.y};
-  wrap.classList.add("drag"); wrap.setPointerCapture(e.pointerId);});
-wrap.addEventListener("pointermove",e=>{if(!drag)return;
-  const sc=box[2]/wrap.getBoundingClientRect().width;
-  view.x=drag.vx+(e.clientX-drag.x)*sc; view.y=drag.vy+(e.clientY-drag.y)*sc; apply();});
-addEventListener("pointerup",()=>{drag=null;wrap.classList.remove("drag");});
-document.getElementById("zin").onclick=()=>zoom(1.5);
-document.getElementById("zout").onclick=()=>zoom(1/1.5);
+  const sc=box[2]/r.width;
+  const mx=cx*sc, my=cy*sc;
+  const z2=Math.min(12,Math.max(1,view.z*f));
+  if(z2===view.z) return;
+  view.x=mx-(mx-view.x)*(z2/view.z);
+  view.y=my-(my-view.y)*(z2/view.z);
+  view.z=z2;
+  if(z2===1){view.x=0;view.y=0;}
+  apply(rerender);
+}
+const zoomCenter=f=>{const r=wrap.getBoundingClientRect(); zoomAt(f,r.width/2,r.height/2);};
+
+wrap.addEventListener("wheel",e=>{
+  e.preventDefault();
+  const r=wrap.getBoundingClientRect();
+  zoomAt(e.deltaY<0?1.18:1/1.18, e.clientX-r.left, e.clientY-r.top);
+},{passive:false});
+
+// 포인터 추적 — 1개=이동, 2개=핀치 확대
+const pts=new Map();
+let drag=null, last2=null, tapT=0, tapX=0, tapY=0;
+
+wrap.addEventListener("pointerdown",e=>{
+  wrap.setPointerCapture(e.pointerId);
+  pts.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(pts.size===1){
+    drag={x:e.clientX,y:e.clientY,vx:view.x,vy:view.y,moved:false};
+    wrap.classList.add("drag");
+  }else{
+    drag=null; last2=null;               // 두 손가락 → 핀치 시작
+  }
+});
+
+wrap.addEventListener("pointermove",e=>{
+  if(!pts.has(e.pointerId)) return;
+  pts.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  const a=[...pts.values()], r=wrap.getBoundingClientRect(), sc=box[2]/r.width;
+
+  if(a.length>=2){                        // ── 핀치 확대/축소 + 이동 ──
+    const d=Math.hypot(a[0].x-a[1].x, a[0].y-a[1].y);
+    const mx=(a[0].x+a[1].x)/2, my=(a[0].y+a[1].y)/2;
+    if(last2){
+      if(last2.d>0) zoomAt(d/last2.d, mx-r.left, my-r.top, false);
+      view.x+=(mx-last2.mx)*sc; view.y+=(my-last2.my)*sc;
+      apply(false);
+    }
+    last2={d,mx,my};
+    return;
+  }
+  if(drag){                               // ── 한 손가락 이동 ──
+    const dx=e.clientX-drag.x, dy=e.clientY-drag.y;
+    if(Math.abs(dx)>4||Math.abs(dy)>4) drag.moved=true;
+    view.x=drag.vx+dx*sc; view.y=drag.vy+dy*sc;
+    apply(false);
+  }
+});
+
+function endPointer(e){
+  pts.delete(e.pointerId);
+  if(pts.size<2) last2=null;
+  if(pts.size===0){
+    // 더블탭 = 확대
+    if(drag&&!drag.moved){
+      const now=Date.now(), r=wrap.getBoundingClientRect();
+      if(now-tapT<300 && Math.hypot(e.clientX-tapX,e.clientY-tapY)<30){
+        zoomAt(2, e.clientX-r.left, e.clientY-r.top); tapT=0;
+      }else{ tapT=now; tapX=e.clientX; tapY=e.clientY; }
+    }
+    drag=null; wrap.classList.remove("drag");
+    render();                              // 제스처 끝나면 마커 크기 정상화
+  }
+}
+wrap.addEventListener("pointerup",endPointer);
+wrap.addEventListener("pointercancel",endPointer);
+
+document.getElementById("zin").onclick=()=>zoomCenter(1.6);
+document.getElementById("zout").onclick=()=>zoomCenter(1/1.6);
 document.getElementById("zfit").onclick=fit;
-wrap.addEventListener("click",e=>{if(e.target.tagName!=="circle"&&!e.target.closest(".spot")) closePanel();});
+wrap.addEventListener("click",e=>{
+  if(e.target.tagName!=="circle"&&!e.target.closest(".spot")) closePanel();
+});
 
 /* ── 상세 패널 ── */
 function open(p){
