@@ -928,8 +928,13 @@ function shareList(){
     .catch(()=>{prompt("이 링크를 복사해 보내세요",url);});
 }
 function readShare(){
-  const j=location.hash.match(/#join=([A-Za-z0-9_-]+)/);     // 공유 폴더 초대 링크
-  if(j){ history.replaceState(null,"",location.pathname); joinFolder(j[1]); return; }
+  // 초대 코드에 한글이 들어갈 수 있다 → 브라우저가 %EC.. 로 넘겨주므로 되돌려서 쓴다
+  const j=location.hash.match(/#join=([^&\s]+)/);
+  if(j){
+    let code=j[1]; try{ code=decodeURIComponent(code); }catch(e){}
+    history.replaceState(null,"",location.pathname);
+    joinFolder(code); return;
+  }
   const m=location.hash.match(/#share=(.+)$/); if(!m) return;
   try{
     const d=b64d(m[1]);
@@ -1036,6 +1041,23 @@ async function sbSignIn(){
   ME_ID=data.user.id; return true;
 }
 
+/* 초대 코드 = 사람이 읽는 이름 + 난수 6자.
+   이름만 쓰면 'jeju' 처럼 흔한 말을 남이 찍어서 폴더에 들어올 수 있다.
+   코드가 곧 열쇠이므로 뒤에 난수를 붙여 추측을 막는다. */
+function makeCode(name){
+  const A="abcdefghjkmnpqrstuvwxyz23456789";      // 헷갈리는 0·O·1·l 제외
+  const slug=(name||"").trim().replace(/\s+/g,"-")
+             .replace(/[^0-9A-Za-z가-힣_-]/g,"").slice(0,20) || "folder";
+  let r="";
+  if(window.crypto&&crypto.getRandomValues){
+    const b=new Uint32Array(6); crypto.getRandomValues(b);
+    for(let i=0;i<6;i++) r+=A[b[i]%A.length];
+  }else{
+    for(let i=0;i<6;i++) r+=A[Math.floor(Math.random()*A.length)];
+  }
+  return slug+"-"+r;
+}
+
 function askName(hint){
   if(MYNAME) return MYNAME;
   const n=(prompt(`이 폴더에서 쓸 내 이름 (예: ${hint})`,"")||"").trim().slice(0,12);
@@ -1096,7 +1118,18 @@ async function shareFolder(){
   // 그래서 id 를 직접 정해 넣고, 커밋된 뒤에 읽는다.
   const fid=(crypto.randomUUID? crypto.randomUUID()
             : "f"+Date.now()+Math.random().toString(16).slice(2));
-  const {error}=await SB.from("folders").insert({id:fid,name:f.name,owner:ME_ID});
+  // 한글도 되지만 링크에선 %EB.. 로 바뀌어 보인다 → 영문·숫자를 권한다
+  const label=(prompt(
+      "초대 링크에 쓸 이름\n뒤에 짧은 난수가 자동으로 붙습니다 (예: jeju-trip-k7f3q2)\n"
+      +"영문·숫자로 지으면 링크가 깔끔하게 보입니다.", f.name)||"").trim();
+  if(!label) return;
+  let error=null;
+  for(let try_=0; try_<3; try_++){                 // 난수가 겹치면 다시 뽑는다
+    const r=await SB.from("folders")
+                    .insert({id:fid,name:f.name,owner:ME_ID,invite_code:makeCode(label)});
+    error=r.error;
+    if(!error || error.code!=="23505") break;
+  }
   if(error) return toast("폴더를 만들지 못했어요");
   if(f.items.length){
     await SB.from("places").insert(f.items.map(it=>({
@@ -1114,7 +1147,7 @@ async function shareFolder(){
 
 function invite(f){
   if(!f||!f.code) return;
-  const url=location.origin+location.pathname+"#join="+f.code;
+  const url=location.origin+location.pathname+"#join="+encodeURIComponent(f.code);
   (navigator.clipboard?navigator.clipboard.writeText(url):Promise.reject())
     .then(()=>toast("초대 링크를 복사했어요 — 카톡으로 보내세요"))
     .catch(()=>prompt("이 링크를 복사해 보내세요",url));
