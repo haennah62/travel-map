@@ -591,6 +591,8 @@ function render(){
 }
 
 addEventListener("resize",()=>{ if(K) render(); });
+// 사이트를 이미 열어둔 채 초대 링크를 누르면 해시만 바뀌고 페이지는 다시 로드되지 않는다
+addEventListener("hashchange",()=>{ if(K) readShare(); });
 
 /* ── 팬 · 줌 (마우스 휠 · 손가락 핀치 · 더블탭) ── */
 const cam=()=>document.getElementById("cam");
@@ -700,10 +702,11 @@ document.getElementById("zfit").onclick=fit;
 /* ══════════ 공유 폴더 설정 ══════════
    아래 두 줄이 비어 있으면 공유 기능은 꺼진 채로, 지금까지와 똑같이 동작한다
    (저장은 이 브라우저에만). Supabase 프로젝트를 만들고 값을 채우면 켜진다.
-   anon 키는 공개돼도 되는 키다 — 실제 권한은 DB의 RLS 규칙이 판단한다.
+   SB_KEY 는 Publishable key(sb_publishable_...) — 브라우저에 노출해도 되는 키다.
+   실제 권한은 DB의 RLS 규칙이 판단한다. Secret key 는 절대 여기 넣지 말 것.
    설정 방법: supabase/설치가이드.md                                        */
-const SB_URL = "";
-const SB_KEY = "";
+const SB_URL = "https://luhpsmigcrgiyfiglwnz.supabase.co";
+const SB_KEY = "sb_publishable_GHeV-ZzuUONkfQk07TU_iw_KjqtNe8Y";
 
 const LS="whereto.lists.v1", LSC="whereto.folder.v1", LSN="whereto.name.v1";
 let LISTS=[], IDX=[];
@@ -1088,19 +1091,23 @@ async function shareFolder(){
   if(!SB) return toast("공유 기능이 아직 연결되지 않았어요");
   if(!await sbSignIn()) return;
   if(!askName("해나")) return;
-  const {data,error}=await SB.from("folders").insert({name:f.name,owner:ME_ID})
-                             .select("id,invite_code").single();
+  // insert 에 select()(=RETURNING)를 붙이면 403 이 난다 — 돌려줄 행에 SELECT 정책이
+  // 걸리는데, 그 시점엔 '소유자를 멤버로 넣는' 트리거가 아직 안 돌아 is_member 가 false다.
+  // 그래서 id 를 직접 정해 넣고, 커밋된 뒤에 읽는다.
+  const fid=(crypto.randomUUID? crypto.randomUUID()
+            : "f"+Date.now()+Math.random().toString(16).slice(2));
+  const {error}=await SB.from("folders").insert({id:fid,name:f.name,owner:ME_ID});
   if(error) return toast("폴더를 만들지 못했어요");
   if(f.items.length){
     await SB.from("places").insert(f.items.map(it=>({
-      folder_id:data.id,k:it.k,name:it.name,sub:it.sub||null,emo:it.emo||null,
+      folder_id:fid,k:it.k,name:it.name,sub:it.sub||null,emo:it.emo||null,
       url:it.url||null,lat:it.lat,lng:it.lng,added_by:ME_ID,added_name:MYNAME})));
   }
   await SB.from("folder_members").update({nickname:MYNAME})
-          .eq("folder_id",data.id).eq("user_id",ME_ID);
+          .eq("folder_id",fid).eq("user_id",ME_ID);
   LISTS=LISTS.filter(l=>l!==f);                    // 로컬본은 서버본으로 대체
   await sbLoad();
-  const i=LISTS.findIndex(l=>l.id===data.id); if(i>=0) openList=i;
+  const i=LISTS.findIndex(l=>l.id===fid); if(i>=0) openList=i;
   saveLists(); folders(); render(); sheet();
   invite(curList());
 }
