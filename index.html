@@ -109,6 +109,18 @@ svg{width:100%;height:100%;display:block}
 .list a:hover{background:var(--gold-bg);border-color:var(--gold)}
 .list .n{font-weight:700} .list .c{font-size:11px;color:var(--ink3)}
 .list .d{margin-left:auto;font-size:11px;color:var(--ink3);font-variant-numeric:tabular-nums}
+.dist{background:var(--blue-bg);border:1.5px solid var(--blue);border-radius:12px;padding:10px 13px;
+      font-size:14px;color:var(--ink2)}
+.dist b{color:var(--blue);font-size:16px}
+.dist span{display:block;font-size:11.5px;color:var(--ink3);margin-top:3px}
+.routes{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:8px}
+.routes a{display:block;text-align:center;text-decoration:none;font-size:13.5px;font-weight:800;
+          padding:11px 8px;border-radius:12px;border:2px solid var(--line2);background:var(--card);color:var(--ink)}
+.routes a:active{background:var(--bg)}
+.askloc{width:100%;font:inherit;font-size:13.5px;font-weight:700;color:var(--blue);cursor:pointer;
+        background:var(--blue-bg);border:1.5px dashed var(--blue);border-radius:12px;padding:12px}
+.chip.me.on{background:var(--blue)}
+.spot .dot{transition:none}
 .more{display:inline-block;margin-top:11px;font-size:12px;color:var(--blue);font-weight:800;text-decoration:none}
 .err{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:30px;z-index:50;
      background:var(--bg);text-align:center;font-size:14px;line-height:1.7;color:var(--ink2)}
@@ -164,8 +176,11 @@ const FILL=[["서울","#FFD9E1"],["부산","#CDE8FF"],["대구","#FFE7C2"],["인
             ["전라북","#E1F3EA"],["전라남","#DAE9FF"],["경상북","#FFEBD8"],["경상남","#E7E1F9"],
             ["제주","#FFDEE9"]];
 const NS="http://www.w3.org/2000/svg";
+const hav=(a,b,c,d)=>{const R=6371,r=Math.PI/180,
+  x=Math.sin((c-a)*r/2)**2+Math.cos(a*r)*Math.cos(c*r)*Math.sin((d-b)*r/2)**2;
+  return 2*R*Math.asin(Math.sqrt(x));};
 
-let K,P=[],ST={},state={ktx:false,trn:false,region:null,sel:null},view={x:0,y:0,z:1},box;
+let K,P=[],ST={},ME=null,state={ktx:false,trn:false,region:null,sel:null},view={x:0,y:0,z:1},box;
 
 const el=(t,a={})=>{const n=document.createElementNS(NS,t);
   for(const k in a) n.setAttribute(k,a[k]); return n;};
@@ -215,6 +230,7 @@ function draw(){
 
   g.appendChild(el("g",{id:"stn"}));
   g.appendChild(el("g",{id:"spot"}));
+  g.appendChild(el("g",{id:"me"}));
   render();
 }
 
@@ -226,8 +242,10 @@ const ORDER=["서울","경기","인천","강원도","충남","충북","경북","
 function bar(){
   const b=document.getElementById("bar");
   b.innerHTML=`<button class="chip ktx" data-l="ktx">🚄 KTX역</button>
-    <button class="chip trn" data-l="trn">🚂 기차역</button>`;
+    <button class="chip trn" data-l="trn">🚂 기차역</button>
+    <button class="chip me" id="meBtn">📍 내 위치</button>`;
   b.onclick=e=>{const t=e.target.closest("button"); if(!t) return;
+    if(t.id==="meBtn") return locate(t);
     state[t.dataset.l]=!state[t.dataset.l];
     t.classList.toggle("on",state[t.dataset.l]); render();};
 }
@@ -294,19 +312,35 @@ function render(){
     });
   });
 
-  // ── 관광지 ──
+  // ── 관광지 : 배율에 따라 점 → 아이콘 → 아이콘+이름 ──
+  const mode = view.z<2 ? "dot" : (view.z<3.2 ? "icon" : "full");
   P.filter(p=>!state.region||grp(p)===state.region).forEach(p=>{
     const [x,y]=prj(p.lat,p.lng), c=`var(${HUE[p.cat]||"--blue"})`;
     const g=el("g",{class:"spot"+(state.sel===p.id?" sel":""),
                     transform:`translate(${x} ${y}) scale(${k})`});
-    g.appendChild(el("circle",{r:19,class:"disc",stroke:c}));
-    const e=el("text",{class:"emo",y:1}); e.textContent=ICON[p.cat]||"📍"; g.appendChild(e);
-    if(!(state.ktx||state.trn)||view.z>=2){   // 역 레이어 켜면 이름은 확대 후에
-      const t=el("text",{class:"nm",y:36}); t.textContent=p.name; g.appendChild(t);
+    if(mode==="dot"){
+      g.appendChild(el("circle",{r:9,fill:"transparent"}));      // 터치 영역
+      g.appendChild(el("circle",{r:4.5,fill:c,stroke:"#fff","stroke-width":1.6,class:"dot"}));
+    }else{
+      g.appendChild(el("circle",{r:19,class:"disc",stroke:c}));
+      const e=el("text",{class:"emo",y:1}); e.textContent=ICON[p.cat]||"📍"; g.appendChild(e);
+      if(mode==="full"&&!(state.ktx||state.trn)||mode==="full"&&view.z>=4){
+        const t=el("text",{class:"nm",y:36}); t.textContent=p.name; g.appendChild(t);
+      }
     }
     g.onclick=ev=>{ev.stopPropagation(); open(p);};
     pg.appendChild(g);
   });
+
+  // ── 내 위치 ──
+  const mg=document.getElementById("me"); mg.innerHTML="";
+  if(ME){
+    const [x,y]=prj(ME.lat,ME.lng);
+    const g=el("g",{transform:`translate(${x} ${y}) scale(${k})`});
+    g.appendChild(el("circle",{r:16,fill:"var(--blue)",opacity:.18}));
+    g.appendChild(el("circle",{r:7,fill:"var(--blue)",stroke:"#fff","stroke-width":3}));
+    mg.appendChild(g);
+  }
 }
 
 addEventListener("resize",()=>{ if(K) render(); });
@@ -406,6 +440,22 @@ wrap.addEventListener("click",e=>{
   if(e.target.tagName!=="circle"&&!e.target.closest(".spot")) closePanel();
 });
 
+/* ── 내 위치 ── */
+function locate(btn){
+  if(!navigator.geolocation) return alert("이 브라우저에서는 위치를 쓸 수 없어요.");
+  btn.textContent="📍 찾는 중…";
+  navigator.geolocation.getCurrentPosition(pos=>{
+    ME={lat:pos.coords.latitude,lng:pos.coords.longitude};
+    btn.textContent="📍 내 위치"; btn.classList.add("on");
+    render();
+    if(state.sel){ const p=P.find(v=>v.id===state.sel); if(p) open(p); }
+  },err=>{
+    btn.textContent="📍 내 위치";
+    alert(err.code===1 ? "위치 권한이 거부됐어요. 브라우저 설정에서 허용해 주세요."
+                       : "위치를 가져오지 못했어요.");
+  },{enableHighAccuracy:true,timeout:10000,maximumAge:60000});
+}
+
 /* ── 상세 패널 ── */
 function open(p){
   state.sel=p.id;
@@ -413,9 +463,29 @@ function open(p){
   if(p.subway) go.push(`<div>🚇 <span>${p.subway.name}</span><b>${p.subway.dist}m</b></div>`);
   if(p.station?.KTX) go.push(`<div>🚄 <span>${p.station.KTX.name}</span><b>${p.station.KTX.km}km</b></div>`);
   if(p.station?.["기차"]) go.push(`<div>🚂 <span>${p.station["기차"].name}</span><b>${p.station["기차"].km}km</b></div>`);
+
   const li=(a,cat)=>a.map(f=>`<a href="${f.url}" target="_blank" rel="noopener"><span class="n">${f.name}</span>
       ${cat&&f.cat?`<span class="c">${f.cat}</span>`:""}<span class="d">${f.dist}m</span></a>`).join("");
   const h=HUE[p.cat]||"--blue";
+
+  // 내 위치 → 목적지
+  let route="";
+  if(ME){
+    const km=hav(ME.lat,ME.lng,p.lat,p.lng);
+    const kakao=`https://map.kakao.com/link/to/${encodeURIComponent(p.name)},${p.lat},${p.lng}`;
+    const naver=`https://map.naver.com/p/directions/${ME.lng},${ME.lat},%EB%82%B4%20%EC%9C%84%EC%B9%98/-/${p.lng},${p.lat},${encodeURIComponent(p.name)}/-/car`;
+    route=`<div class="sec"><h3>내 위치에서</h3>
+      <div class="dist">직선거리 <b>${km<1?Math.round(km*1000)+"m":km.toFixed(1)+"km"}</b>
+        <span>· 아래에서 실제 경로와 소요시간을 확인하세요</span></div>
+      <div class="routes">
+        <a href="${kakao}" target="_blank" rel="noopener">🗺️ 카카오맵 길찾기</a>
+        <a href="${naver}" target="_blank" rel="noopener">🧭 네이버 길찾기</a>
+      </div></div>`;
+  }else{
+    route=`<div class="sec"><button class="askloc" onclick="locate(document.getElementById('meBtn'))">
+      📍 내 위치를 켜면 여기까지 가는 길을 알려드려요</button></div>`;
+  }
+
   document.getElementById("panel").innerHTML=`
     <div class="hero">${p.img?`<img src="${p.img}" alt="${p.name}">`:`<div class="none">${ICON[p.cat]||"📍"}</div>`}
       <button class="close" onclick="closePanel()">✕</button></div>
@@ -425,12 +495,15 @@ function open(p){
         <span class="tag" style="background:var(--bg);color:var(--ink3)">${p.region}</span></div>
       <p class="addr">${p.addr||""}</p>
       ${p.desc?`<p class="desc">${p.desc}</p>`:""}
-      ${go.length?`<div class="sec"><h3>가는 법</h3><div class="go">${go.join("")}</div></div>`:""}
+      ${route}
+      ${go.length?`<div class="sec"><h3>대중교통</h3><div class="go">${go.join("")}</div></div>`:""}
+      ${p.fun?.length?`<div class="sec"><h3>주변 놀거리</h3><div class="list">${li(p.fun,1)}</div></div>`:""}
       ${p.food?.length?`<div class="sec"><h3>주변 맛집</h3><div class="list">${li(p.food,1)}</div></div>`:""}
       ${p.cafe?.length?`<div class="sec"><h3>주변 카페</h3><div class="list">${li(p.cafe,0)}</div></div>`:""}
       ${p.wiki?`<a class="more" href="${p.wiki}" target="_blank" rel="noopener">위키백과에서 더 보기 →</a>`:""}
     </div>`;
   document.getElementById("panel").classList.add("open");
+  document.getElementById("panel").scrollTop=0;
   render();
 }
 function closePanel(){state.sel=null;document.getElementById("panel").classList.remove("open");render();}
