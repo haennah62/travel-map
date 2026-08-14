@@ -52,7 +52,7 @@ header>*{pointer-events:auto}
 .chip:hover{transform:translateY(-1px)}
 .chip.on{color:#fff;border-color:transparent;box-shadow:0 2px 0 rgba(0,0,0,.14)}
 .chip.ktx.on{background:var(--hot)} .chip.trn.on{background:var(--ink2)}
-.chip.reg.on{background:var(--green)}
+.chip.reg.on{background:var(--green)} .chip.favonly.on{background:var(--gold)}
 .gap{width:8px}
 
 /* ── 지도 ── */
@@ -78,6 +78,7 @@ svg{width:100%;height:100%;display:block}
           paint-order:stroke;stroke:#fff;stroke-width:4;pointer-events:none}
 .spot:hover .disc{stroke-width:5}
 .spot.sel .disc{stroke:var(--gold);stroke-width:6}
+.spot.saved .disc{stroke:var(--gold);stroke-width:5}
 
 /* ── 확대/축소 ── */
 .zoom{position:fixed;right:14px;bottom:14px;z-index:20;display:grid;gap:6px}
@@ -263,7 +264,7 @@ const hav=(a,b,c,d)=>{const R=6371,r=Math.PI/180,
   x=Math.sin((c-a)*r/2)**2+Math.cos(a*r)*Math.cos(c*r)*Math.sin((d-b)*r/2)**2;
   return 2*R*Math.asin(Math.sqrt(x));};
 
-let K,P=[],ST={},CT=[],ME=null,state={ktx:false,trn:false,region:null,sel:null},view={x:0,y:0,z:1},box;
+let K,P=[],ST={},CT=[],ME=null,state={ktx:false,trn:false,region:null,sel:null,fav:false},view={x:0,y:0,z:1},box;
 
 const el=(t,a={})=>{const n=document.createElementNS(NS,t);
   for(const k in a) n.setAttribute(k,a[k]); return n;};
@@ -330,12 +331,63 @@ function bar(){
   b.innerHTML=`<button class="chip ktx" data-l="ktx">🚄 KTX역</button>
     <button class="chip trn" data-l="trn">🚂 기차역</button>
     <button class="chip me" id="meBtn">📍 내 위치</button>
-    <button class="chip" id="favBtn">⭐ 저장한 곳</button>`;
+    <button class="chip" id="favBtn">⭐ 저장한 곳</button>
+    <button class="chip favonly" id="favOnly">⭐만 보기</button>`;
   b.onclick=e=>{const t=e.target.closest("button"); if(!t) return;
     if(t.id==="meBtn") return locate(t);
     if(t.id==="favBtn") return sheet(true);
+    if(t.id==="favOnly") return favOnly();
     state[t.dataset.l]=!state[t.dataset.l];
     t.classList.toggle("on",state[t.dataset.l]); render();};
+}
+
+/* ── ⭐만 보기 : 저장한 곳만 지도에 남긴다 ── */
+// 저장한 곳 = 관광지(P에 있는 것) + 검색으로 담은 맛집·카페·놀거리·전국검색 지점
+function favPoints(){
+  const byId=new Map(P.map(p=>[p.id,p]));
+  return allItems().map(it=>{
+    const p=byId.get(it.k);
+    return p ? {lat:p.lat,lng:p.lng,place:p}
+             : (it.lat!=null ? {lat:+it.lat,lng:+it.lng,item:it} : null);
+  }).filter(Boolean);
+}
+
+function favOnly(on){
+  const pts=favPoints();
+  if(!state.fav && !pts.length)
+    return toast("저장한 곳이 없어요 — 검색 결과나 상세 화면의 ★ 을 눌러보세요");
+  state.fav = on===undefined ? !state.fav : !!on;
+  if(state.fav){                       // 지역 필터와 겹치면 아무것도 안 보이므로 전국으로 되돌린다
+    state.region=null;
+    document.querySelectorAll("#side button").forEach(b=>b.classList.toggle("on",!b.dataset.r));
+  }
+  closePanel();
+  state.fav ? fitFav() : (render(), fit());
+}
+
+// 저장한 곳 전체가 화면에 들어오도록 맞춘다.
+// 사이드바(왼쪽)·헤더(위)가 지도를 덮고 있으므로, 그 둘에 가리지 않는 영역을 기준으로 맞춘다.
+function fitFav(){
+  const pts=favPoints().map(v=>prj(v.lat,v.lng));
+  render();
+  const r=wrap.getBoundingClientRect();
+  if(!pts.length||!r.width) return;
+  const sc=box[2]/r.width;                          // CSS 픽셀 → viewBox 단위
+  const hd=document.querySelector("header");
+  const top =(hd?hd.getBoundingClientRect().height:0)*sc;
+  const left=(hd?hd.getBoundingClientRect().left  :0)*sc;   // 헤더 왼쪽 여백 = 사이드바 폭
+  const aw=Math.max(120,box[2]-left), ah=Math.max(120,box[3]-top);
+  const cx=left+aw/2, cy=top+ah/2;                  // 안 가려지는 영역의 중심
+
+  const x0=Math.min(...pts.map(p=>p[0])), x1=Math.max(...pts.map(p=>p[0]));
+  const y0=Math.min(...pts.map(p=>p[1])), y1=Math.max(...pts.map(p=>p[1]));
+  const pad=70, lbl=70;                             // lbl = 마커 아래 이름표 자리
+  const w=Math.max(x1-x0,40)+pad*2, h=Math.max(y1-y0,40)+pad*2+lbl;
+  view.z = pts.length===1 ? Math.max(view.z,6)
+                          : Math.min(9,Math.max(1,Math.min(aw/w,ah/h)));
+  view.x=cx-((x0+x1)/2)*view.z;
+  view.y=cy-((y0+y1)/2+lbl/2)*view.z;               // 남는 여백을 아래쪽에 준다
+  apply();
 }
 
 function side(){
@@ -346,6 +398,7 @@ function side(){
     <button class="all on" data-r="">전국 <em>${P.length}</em></button>`
     +list.map(r=>`<button data-r="${r}">${r} <em>${cnt[r]}</em></button>`).join("");
   n.onclick=e=>{const t=e.target.closest("button"); if(!t) return;
+    state.fav=false;                     // 지역을 고르면 ⭐만 보기는 해제
     state.region=t.dataset.r||null;
     [...n.querySelectorAll("button")].forEach(b=>
       b.classList.toggle("on",(b.dataset.r||null)===state.region));
@@ -421,9 +474,21 @@ function render(){
     });
   });
 
+  // ── ⭐만 보기 칩 상태·개수 갱신 ──
+  const fb=document.getElementById("favOnly");
+  if(fb){
+    const n=allItems().length;
+    fb.textContent = n ? `⭐만 보기 ${n}` : "⭐만 보기";
+    fb.classList.toggle("on",state.fav);
+  }
+
   // ── 관광지 : 배율에 따라 점 → 아이콘 → 아이콘+이름 ──
-  const mode = view.z<2 ? "dot" : (view.z<3.2 ? "icon" : "full");
-  P.filter(p=>!state.region||grp(p)===state.region).forEach(p=>{
+  // ⭐만 보기는 개수가 적으니 배율과 무관하게 아이콘(+이름)으로 — 점으로 찍으면 찾기 어렵다
+  const mode = state.fav ? (allItems().length<=25 ? "full" : "icon")
+                         : (view.z<2 ? "dot" : (view.z<3.2 ? "icon" : "full"));
+  const shown = state.fav ? P.filter(p=>isFav(p.id))
+                          : P.filter(p=>!state.region||grp(p)===state.region);
+  shown.forEach(p=>{
     const [x,y]=prj(p.lat,p.lng), c=`var(${HUE[p.cat]||"--blue"})`;
     const g=el("g",{class:"spot"+(state.sel===p.id?" sel":"")+(isFav(p.id)?" fav":""),
                     transform:`translate(${x} ${y}) scale(${k})`});
@@ -440,6 +505,25 @@ function render(){
     g._p=p;                     // 요소에 장소를 붙여둔다
     pg.appendChild(g);
   });
+
+  // ── ⭐만 보기: 검색으로 담은 맛집·카페·전국검색 지점도 함께 (관광지가 아니라 P에 없다) ──
+  if(state.fav){
+    const ids=new Set(P.map(p=>p.id));
+    allItems().filter(it=>!ids.has(it.k)&&it.lat!=null).forEach(it=>{
+      const [x,y]=prj(+it.lat,+it.lng);
+      const g=el("g",{class:"spot saved",transform:`translate(${x} ${y}) scale(${k})`});
+      if(mode==="dot"){
+        g.appendChild(el("circle",{r:9,fill:"transparent"}));
+        g.appendChild(el("circle",{r:4.5,fill:"var(--gold)",stroke:"#fff","stroke-width":1.6,class:"dot"}));
+      }else{
+        g.appendChild(el("circle",{r:19,class:"disc"}));
+        const e=el("text",{class:"emo",y:1}); e.textContent=it.emo||"📌"; g.appendChild(e);
+        if(mode==="full"){const t=el("text",{class:"nm",y:36}); t.textContent=it.name; g.appendChild(t);}
+      }
+      g._f=it;                  // 저장 항목을 붙여둔다
+      pg.appendChild(g);
+    });
+  }
 
   // ── 내 위치 ──
   const mg=document.getElementById("me"); mg.innerHTML="";
@@ -494,7 +578,7 @@ wrap.addEventListener("pointerdown",e=>{
   pts.set(e.pointerId,{x:e.clientX,y:e.clientY});
   if(pts.size===1){
     const sp=e.target.closest && e.target.closest(".spot");
-    drag={x:e.clientX,y:e.clientY,vx:view.x,vy:view.y,moved:false,spot:sp&&sp._p};
+    drag={x:e.clientX,y:e.clientY,vx:view.x,vy:view.y,moved:false,spot:sp&&sp._p,fav:sp&&sp._f};
     wrap.classList.add("drag");
   }else{
     drag=null; last2=null;               // 두 손가락 → 핀치 시작
@@ -533,6 +617,9 @@ function endPointer(e){
     if(d && !d.moved){
       if(d.spot){                          // 관광지를 눌렀다 → 상세 열기
         open(d.spot); return;
+      }
+      if(d.fav){                           // 저장해둔 맛집·카페 지점을 눌렀다
+        openSaved(d.fav); return;
       }
       // 빈 곳: 더블탭이면 확대, 아니면 패널 닫기
       const now=Date.now(), r=wrap.getBoundingClientRect();
@@ -692,7 +779,11 @@ function toggleFav(v){
     cur.items.push({k:v.k,name:v.name,sub:v.sub,emo:v.emo,lat:v.lat,lng:v.lng,url:v.url||""});
     toast(`"${cur.name}" 에 담았어요`);
   }
-  saveLists(); render();
+  saveLists();
+  if(state.fav && !allItems().length){   // 마지막 하나를 빼면 빈 지도가 되므로 전체로 되돌린다
+    state.fav=false; toast("저장한 곳이 없어 전체 지도로 돌아왔어요");
+  }
+  render();
   const q=document.getElementById("q").value.trim(); if(q) drawResults(q);
   if(state.sel){const p=P.find(v2=>v2.id===state.sel); if(p) open(p);}
 }
@@ -725,7 +816,10 @@ function sheet(show=true){
              아직 담은 곳이 없어요. 관광지나 맛집 옆의 ★ 을 눌러보세요.</p>`}
     </div>
     <div class="shbtn">
-      <button class="pri" id="shr">🔗 링크 복사해 공유</button>
+      <button class="pri" id="mapfav">🗺️ 지도에서 보기</button>
+      <button id="shr">🔗 링크 복사해 공유</button>
+    </div>
+    <div class="shbtn" style="grid-template-columns:1fr;margin-top:8px">
       <button id="cls">닫기</button>
     </div>`;
   sh.classList.add("on");
@@ -776,6 +870,7 @@ function wireUI(){
     const t=e.target;
     if(t.id==="cls") return sheet(false);
     if(t.id==="shr") return shareList();
+    if(t.id==="mapfav"){ sheet(false); return favOnly(true); }
     if(t.id==="addl"){
       const v=document.getElementById("newl").value.trim();
       if(!v) return; LISTS.push({id:"l"+Date.now(),name:v,items:[]});
@@ -865,8 +960,40 @@ function open(p){
   document.getElementById("panel").scrollTop=0;
   render();
 }
+/* ── 저장해둔 지점(맛집·카페·전국검색)의 간단 상세 — 관광지가 아니라 위키·주변정보가 없다 ── */
+function openSaved(it){
+  state.sel=null;
+  let route="";
+  if(ME){
+    const km=hav(ME.lat,ME.lng,+it.lat,+it.lng);
+    const kakao=`https://map.kakao.com/link/to/${encodeURIComponent(it.name)},${it.lat},${it.lng}`;
+    const naver=`https://map.naver.com/p/directions/${ME.lng},${ME.lat},%EB%82%B4%20%EC%9C%84%EC%B9%98/-/${it.lng},${it.lat},${encodeURIComponent(it.name)}/-/car`;
+    route=`<div class="sec"><h3>내 위치에서</h3>
+      <div class="dist">직선거리 <b>${km<1?Math.round(km*1000)+"m":km.toFixed(1)+"km"}</b></div>
+      <div class="routes">
+        <a href="${kakao}" target="_blank" rel="noopener">🗺️ 카카오맵 길찾기</a>
+        <a href="${naver}" target="_blank" rel="noopener">🧭 네이버 길찾기</a>
+      </div></div>`;
+  }else{
+    route=`<div class="sec"><button class="askloc" onclick="locate(document.getElementById('meBtn'))">
+      📍 내 위치를 켜면 여기까지 가는 길을 알려드려요</button></div>`;
+  }
+  const arg=JSON.stringify(it).replace(/'/g,"&#39;");
+  document.getElementById("panel").innerHTML=`
+    <div class="hero"><div class="none">${it.emo||"📌"}</div>
+      <button class="close" onclick="closePanel()">✕</button></div>
+    <div class="pbody">
+      <div class="ptitle"><h2>${esc(it.name)}</h2>
+        <button class="star on" title="저장 해제" onclick='toggleFav(${arg});closePanel();'>★</button></div>
+      <p class="addr">${esc(it.sub||"")}</p>
+      ${route}
+      ${it.url?`<a class="more" href="${it.url}" target="_blank" rel="noopener">카카오맵에서 보기 →</a>`:""}
+    </div>`;
+  document.getElementById("panel").classList.add("open");
+}
+
 function closePanel(){state.sel=null;document.getElementById("panel").classList.remove("open");render();}
-window.closePanel=closePanel; window.toggleFav=toggleFav; window.sheet=sheet;
+window.closePanel=closePanel; window.toggleFav=toggleFav; window.sheet=sheet; window.openSaved=openSaved;
 
 boot();
 </script>
